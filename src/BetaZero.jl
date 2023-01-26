@@ -1,12 +1,14 @@
 module BetaZero
 
 using BSON
+using Distributed
 using Flux
 using MCTS
 using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 using Parameters
 using POMDPs
 using POMDPSimulators
+using ProgressMeter
 using Random
 using Statistics
 
@@ -61,7 +63,7 @@ end
                                                 k_action=2.0,
                                                 alpha_action=0.25,
                                                 tree_in_info=true,
-                                                show_progress=true,
+                                                show_progress=false,
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a neural network lookup
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
 end
@@ -256,18 +258,34 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f)
     returns = []
     # policies = []
 
-    # TODO: pmap
-    for i in 1:solver.n_data_gen
-        @info "Generating data ($i/$(solver.n_data_gen))"
-        s0 = rand(ds0)
-        b0 = POMDPs.initialize_belief(up, ds0)
-        data = run_simulation(pomdp, mcts_planner, up, b0, s0)
-        for d in data
-            push!(beliefs, d.b)
-            push!(returns, d.z)
-            # push!(policies, d.π)
-        end
+    # if nprocs() < nbatches
+    #     addprocs(nbatches - nprocs())
+    # end
+    @info "Number of processes: $(nprocs())"
+
+    progress = Progress(solver.n_data_gen)
+    channel = RemoteChannel(()->Channel{Bool}(), 1)
+
+    @async while take!(channel)
+        next!(progress)
     end
+
+    @time pmap(batch->begin
+                # TODO: Batches!
+                for i in 1:solver.n_data_gen
+                    @info "Generating data ($i/$(solver.n_data_gen))"
+                    s0 = rand(ds0)
+                    b0 = POMDPs.initialize_belief(up, ds0)
+                    data = run_simulation(pomdp, mcts_planner, up, b0, s0)
+                    for d in data
+                        push!(beliefs, d.b)
+                        push!(returns, d.z)
+                        # push!(policies, d.π)
+                    end
+                end
+            end, 1:solver.n_data_gen)
+    put!(channel, false) # tell printing task to finish
+
     ndims_belief = ndims(beliefs[1])
     X = cat(beliefs...; dims=ndims_belief+1)
     Y = reshape(Float32.(returns), 1, length(returns))
