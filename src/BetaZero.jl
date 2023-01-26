@@ -247,20 +247,12 @@ end
 
 function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f)
     # Run MCTS to generate data using the neural network `f`
-    # TODO. See `run_trial` in utils (reuse MixedFidelityModelSelection to run in parallel?)
-    # TODO: See `betazero.jl` in MEParallel.jl
-
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b,f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     up = solver.updater
     ds0 = POMDPs.initialstate_distribution(pomdp)
-    beliefs = []
-    returns = []
-    # policies = []
 
-    # if nprocs() < nbatches
-    #     addprocs(nbatches - nprocs())
-    # end
+    # (nprocs() < nbatches) && addprocs(nbatches - nprocs())
     @info "Number of processes: $(nprocs())"
 
     progress = Progress(solver.n_data_gen)
@@ -270,21 +262,28 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f)
         next!(progress)
     end
 
-    @time pmap(batch->begin
-                # TODO: Batches!
-                for i in 1:solver.n_data_gen
-                    @info "Generating data ($i/$(solver.n_data_gen))"
-                    s0 = rand(ds0)
-                    b0 = POMDPs.initialize_belief(up, ds0)
-                    data = run_simulation(pomdp, mcts_planner, up, b0, s0)
-                    for d in data
-                        push!(beliefs, d.b)
-                        push!(returns, d.z)
-                        # push!(policies, d.π)
-                    end
-                end
-            end, 1:solver.n_data_gen)
+    @time parallel_data = pmap(i->begin
+            # TODO: Batches!
+            @info "Generating data ($i/$(solver.n_data_gen))"
+            s0 = rand(ds0)
+            b0 = POMDPs.initialize_belief(up, ds0)
+            data = run_simulation(pomdp, mcts_planner, up, b0, s0)
+            B = []
+            Z = []
+            # Π = []
+            for d in data
+                push!(B, d.b)
+                push!(Z, d.z)
+                # push!(Π, d.π) # TODO.
+            end
+            put!(channel, true) # trigger progress bar update
+            B, Z
+        end, 1:solver.n_data_gen)
+
     put!(channel, false) # tell printing task to finish
+
+    beliefs = vcat(first.(parallel_data)...) # combine all beliefs
+    returns = vcat(last.(parallel_data)...) # combine all returns
 
     ndims_belief = ndims(beliefs[1])
     X = cat(beliefs...; dims=ndims_belief+1)
@@ -294,20 +293,42 @@ end
 
 
 """
+Compute the discounted `γ` returns from reward vector `R`.
+"""
+function compute_returns(R; γ=1)
+    T = length(R)
+    G = zeros(T)
+    for t in reverse(1:T)
+        G[t] = t==T ? R[t] : G[t] = R[t] + γ*G[t+1]
+    end
+    return G
+end
+
+
+"""
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
 function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0; max_steps=100)
-    discounted_return = 0.0
-    γ = POMDPs.discount(pomdp)
+    rewards = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
-
     for (r,bp,t) in stepthrough(pomdp, policy, up, b0, s0, "r,bp,t", max_steps=max_steps)
-        discounted_return += γ^(t-1)*r
+        @info "Simulation time step $t"
+        push!(rewards, r)
         push!(data, BetaZeroTrainingData(b=input_representation(bp)))
     end
 
-    for d in data
-        d.z = discounted_return
+    γ = POMDPs.discount(pomdp)
+    G = compute_returns(rewards; γ=γ)
+
+    s_massive = s0.ore_map .>= pomdp.massive_threshold
+    massive = pomdp.dim_scale*sum(s_massive)
+
+    @show massive
+    @show G
+    @show rewards
+
+    for (t,d) in enumerate(data)
+        d.z = G[t]
     end
 
     return data

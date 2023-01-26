@@ -1,8 +1,11 @@
 using Revise
-using BetaZero
+using Distributed
 
-include("minex_pomdp.jl")
-include("minex_representation.jl")
+@everywhere begin
+    using BetaZero
+    include("minex_pomdp.jl")
+    include("minex_representation.jl")
+end
 
 solver = BetaZeroSolver(updater=up)
 solver.belief_reward = (pomdp::POMDP, b, a, bp)->mean(reward(pomdp, s, a) for s in particles(b))
