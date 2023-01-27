@@ -88,7 +88,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         @info "BetaZero iteration $i/$(solver.n_iterations)"
 
         # 1) Generate data using the best BetaZero agent so far.
-        data = generate_data(pomdp, solver, f_prev)
+        data = generate_data(pomdp, solver, f_prev; iter=i)
 
         # 2) Optimize neural network parameters with recent simulated data.
         f_curr = train_network(f_prev, data, solver.network_params)
@@ -198,7 +198,7 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters)
         end
     end
 
-    if verbose_plot_frequency != Inf
+    if nn_params.verbose_plot_frequency != Inf
         learning_curve = plot!()
         display(learning_curve)
 
@@ -247,7 +247,7 @@ function evaluate_agent(f_prev, f_curr; simulations=100)
 end
 
 
-function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f)
+function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
     # Run MCTS to generate data using the neural network `f`
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b,f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
@@ -267,6 +267,8 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f)
     @time parallel_data = pmap(i->begin
             # TODO: Batches!
             @info "Generating data ($i/$(solver.n_data_gen))"
+            seed = parse(Int, string(iter, lpad(i, length(digits(solver.n_data_gen))), '0')) # 1001, 1002, etc. for BetaZero iter=1
+            Random.seed!(seed)
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
             data = run_simulation(pomdp, mcts_planner, up, b0, s0)
