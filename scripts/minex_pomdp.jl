@@ -20,8 +20,7 @@ mainbody = BlobNode(grid_dims=grid_dims)
 
 pomdp = MineralExplorationPOMDP(max_bores=MAX_BORES, delta=GRID_SPACING+1, grid_spacing=GRID_SPACING,
                                 true_mainbody_gen=true_mainbody, mainbody_gen=mainbody, original_max_movement=MAX_MOVEMENT,
-                                min_bores=MIN_BORES, grid_dim=grid_dims, high_fidelity_dim=true_grid_dims,
-                                ratio=grid_dims ./ (50,50,1))
+                                min_bores=MIN_BORES, grid_dim=grid_dims, high_fidelity_dim=true_grid_dims)
 initialize_data!(pomdp, N_INITIAL)
 
 ds0 = POMDPs.initialstate_distribution(pomdp)
