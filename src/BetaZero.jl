@@ -17,20 +17,14 @@ include("representation.jl")
 
 export
     BetaZeroSolver,
-    BetaZeroPolicy
-
-# function policy_iteration()
-#     policy_evaluation()
-#     policy_improvement()
-# end
-
-# function policy_evaluation() end
-# function policy_improvement() end
+    BetaZeroPolicy,
+    BetaZeroNetworkParameters,
+    BeliefMDP
 
 
 mutable struct BetaZeroPolicy <: POMDPs.Policy
     network::Chain
-    mcts_planner::AbstractMCTSPlanner
+    planner::AbstractMCTSPlanner
 end
 
 
@@ -50,7 +44,7 @@ end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 20
+    n_iterations::Int = 5
     n_data_gen::Int = 100 # TODO: Change to ~ 100-1000
     n_evaluate::Int = 5 # TODO: Change to 100
     updater::POMDPs.Updater
@@ -82,7 +76,6 @@ The main BetaZero policy iteration algorithm.
 function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
     solver.bmdp = BeliefMDP(pomdp, solver.updater, solver.belief_reward)
     f_prev = initialize_network(solver)
-    # policy = BetaZeroPolicy() # TODO.
 
     for i in 1:solver.n_iterations
         @info "BetaZero iteration $i/$(solver.n_iterations)"
@@ -95,14 +88,20 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
 
         # 3) BetaZero agent is evaluated (compared to previous agent, beating it in in returns).
         f_prev = f_curr
-        # f_prev = evaluate_agent(f_prev, f_curr)
+        # f_prev = evaluate_agent(f_prev, f_curr) # TODO.
     end
 
-    # return policy
-    return f_prev, data
+    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f_prev)
+    mcts_planner = solve(solver.mcts_solver, solver.bmdp)
+    policy = BetaZeroPolicy(f_prev, mcts_planner)
+
+    return policy
 end
 
 
+"""
+Initialize policy & value network with random weights.
+"""
 function initialize_network(solver::BetaZeroSolver) # LeNet5
     nn_params = solver.network_params
     input_size = nn_params.input_size
@@ -127,6 +126,9 @@ function initialize_network(solver::BetaZeroSolver) # LeNet5
 end
 
 
+"""
+Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
+"""
 function train_network(f, data, nn_params::BetaZeroNetworkParameters)
     x_data, y_data = data.X, data.Y
 
@@ -217,6 +219,9 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters)
 end
 
 
+"""
+Evaluate the neural network `f` using the `belief` as input.
+"""
 function value_lookup(nn_params, belief, f)
     device = nn_params.device
     b = input_representation(belief)
@@ -254,6 +259,9 @@ function evaluate_agent(f_prev, f_curr; simulations=100)
 end
 
 
+"""
+Generate training data using online MCTS with the best network so far `f` (parallelized across episodes).
+"""
 function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
     # Run MCTS to generate data using the neural network `f`
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b,f)
@@ -331,6 +339,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     γ = POMDPs.discount(pomdp)
     G = compute_returns(rewards; γ=γ)
 
+    # TODO: Remove
     s_massive = s0.ore_map .>= pomdp.massive_threshold
     massive = pomdp.dim_scale*sum(s_massive)
 
@@ -346,8 +355,21 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
 end
 
 
+"""
+User defined method to collect performance and validation metrics during BetaZero policy iteration.
+"""
 function collect_metrics()
-    # TODO: Collect intermediate results from the steps above.
+    # - mean discounted return over time
+    # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
+    # - number of actions (e.g., number of drills for mineral exploration)
+end
+
+
+"""
+Get action from BetaZero policy (online MCTS using value & policy network).
+"""
+function POMDPs.action(policy::BetaZeroPolicy, b)
+    return action(policy.planner, b)
 end
 
 
