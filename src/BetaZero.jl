@@ -50,7 +50,7 @@ end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 100
+    n_iterations::Int = 2
     n_data_gen::Int = 10 # TODO: Change to ~ 100-1000
     n_evaluate::Int = 5 # TODO: Change to 100
     updater::POMDPs.Updater
@@ -81,24 +81,24 @@ The main BetaZero policy iteration algorithm.
 """
 function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
     solver.bmdp = BeliefMDP(pomdp, solver.updater, solver.belief_reward)
-    f_prev = f = initialize_network(solver)
-    data = generate_data(pomdp, solver, f_prev)
+    f_prev = initialize_network(solver)
     # policy = BetaZeroPolicy() # TODO.
 
-    for i in 1:1 # TODO: solver.interations
-        # 1) Optimize neural network parameters with recent simulated data.
-        f_curr = train_network(f, data, solver.network_params)
+    for i in 1:solver.n_iterations
+        @info "BetaZero iteration $i/$(solver.n_iterations)"
 
-        # 2) BetaZero agent is evaluated (compared to previous agent, beating it in 55%+ simulations).
-        f = f_curr
-        # f = evaluate_agent(f_prev, f_curr)
+        # 1) Generate data using the best BetaZero agent so far.
+        data = generate_data(pomdp, solver, f_prev)
 
-        # 3) Generate new data using the best BetaZero agent so far.
-        # data = generate_data(pomdp, f)
+        # 2) Optimize neural network parameters with recent simulated data.
+        f_curr = train_network(f_prev, data, solver.network_params)
+
+        # 3) BetaZero agent is evaluated (compared to previous agent, beating it in in returns).
+        f_prev = f_curr
+        # f_prev = evaluate_agent(f_prev, f_curr)
     end
 
     # return policy
-    # return f
     return f, data
 end
 
@@ -198,14 +198,16 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters)
         end
     end
 
-    learning_curve = plot!()
-    display(learning_curve)
+    if verbose_plot_frequency != Inf
+        learning_curve = plot!()
+        display(learning_curve)
 
-    value_model = (cpu(f(x_valid))' .* std_y) .+ mean_y
-    value_data = (cpu(y_valid)' .* std_y) .+ mean_y
-    value_distribution = histogram(value_model, alpha=0.5, label="model", c=3)
-    histogram!(value_data, alpha=0.5, label="data", c=4)
-    display(value_distribution)
+        value_model = (cpu(f(x_valid))' .* std_y) .+ mean_y
+        value_data = (cpu(y_valid)' .* std_y) .+ mean_y
+        value_distribution = histogram(value_model, alpha=0.5, label="model", c=3)
+        histogram!(value_data, alpha=0.5, label="data", c=4)
+        display(value_distribution)
+    end
 
     return f
 end
