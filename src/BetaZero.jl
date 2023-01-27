@@ -50,8 +50,8 @@ end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 2
-    n_data_gen::Int = 10 # TODO: Change to ~ 100-1000
+    n_iterations::Int = 20
+    n_data_gen::Int = 100 # TODO: Change to ~ 100-1000
     n_evaluate::Int = 5 # TODO: Change to 100
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
@@ -99,7 +99,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
     end
 
     # return policy
-    return f, data
+    return f_prev, data
 end
 
 
@@ -114,7 +114,7 @@ function initialize_network(solver::BetaZeroSolver) # LeNet5
     num_dense2 = 84
     out_dim = 1
 
-    return Chain(
+    f = Chain(
         Conv(filter, input_size[end]=>num_filters1, relu),
         Conv(filter, num_filters1=>num_filters2, relu),
         Flux.flatten,
@@ -122,6 +122,8 @@ function initialize_network(solver::BetaZeroSolver) # LeNet5
         Dense(num_dense1, num_dense2, relu),
         Dense(num_dense2, out_dim),
     )
+
+    return nn_params.device(f)
 end
 
 
@@ -136,6 +138,8 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters)
 
     n_data = length(y_data)
     n_train = Int(n_data ÷ (1/nn_params.training_split))
+
+    @info "Data set size: $n_data"
 
     perm = randperm(n_data)
     perm_train = perm[1:n_train]
@@ -213,11 +217,14 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters)
 end
 
 
-function value_lookup(belief, f)
+function value_lookup(nn_params, belief, f)
+    device = nn_params.device
     b = input_representation(belief)
     b = Float32.(b)
     x = Flux.unsqueeze(b; dims=ndims(b)+1)
-    value = first(f(x)) # returns 1 element 1D array
+    x = device(x) # put data on CPU or GPU (i.e., `device`)
+    y = f(x) # evaluate network `f`
+    value = cpu(y)[1] # returns 1 element 1D array
     return value
 end
 
@@ -249,7 +256,7 @@ end
 
 function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
     # Run MCTS to generate data using the neural network `f`
-    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b,f)
+    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b,f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     up = solver.updater
     ds0 = POMDPs.initialstate_distribution(pomdp)
@@ -266,9 +273,9 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
 
     @time parallel_data = pmap(i->begin
             # TODO: Batches!
-            @info "Generating data ($i/$(solver.n_data_gen))"
-            seed = parse(Int, string(iter, lpad(i, length(digits(solver.n_data_gen))), '0')) # 1001, 1002, etc. for BetaZero iter=1
+            seed = parse(Int, string(iter, lpad(i, length(digits(solver.n_data_gen)), '0'))) # 1001, 1002, etc. for BetaZero iter=1
             Random.seed!(seed)
+            @info "Generating data ($i/$(solver.n_data_gen)) with seed ($seed)"
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
             data = run_simulation(pomdp, mcts_planner, up, b0, s0)
