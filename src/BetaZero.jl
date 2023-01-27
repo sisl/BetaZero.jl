@@ -45,7 +45,7 @@ end
     loss_func::Function = Flux.Losses.mae # MAE works well for problems with large returns around zero, and spread out otherwise.
     device = gpu
     verbose_update_frequency::Int = 1 # Frequency of printed training output
-    verbose_plot_frequency::Int = 10 # Frequency of plotted training/validation output
+    verbose_plot_frequency::Number = 10 # Frequency of plotted training/validation output
 end
 
 
