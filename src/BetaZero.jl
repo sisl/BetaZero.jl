@@ -44,7 +44,7 @@ end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 10
+    n_iterations::Int = 100
     n_data_gen::Int = 100
     n_evaluate::Int = 5 # TODO: Change to 100
     updater::POMDPs.Updater
@@ -80,7 +80,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
     solver.bmdp = BeliefMDP(pomdp, solver.updater, solver.belief_reward)
     f_prev = initialize_network(solver)
 
-    for i in 1:solver.n_iterations
+    @time for i in 1:solver.n_iterations
         @info "BetaZero iteration $i/$(solver.n_iterations)"
 
         # 1) Generate data using the best BetaZero agent so far.
@@ -218,6 +218,13 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters)
         display(value_distribution)
     end
 
+    # Clean GPU memory explicitly
+    if device == gpu
+        x_train = y_train = x_valid = y_valid = nothing
+        GC.gc()
+        Flux.CUDA.reclaim()
+    end
+
     return f
 end
 
@@ -267,7 +274,7 @@ Generate training data using online MCTS with the best network so far `f` (paral
 """
 function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
     # Run MCTS to generate data using the neural network `f`
-    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b,f)
+    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     up = solver.updater
     ds0 = POMDPs.initialstate_distribution(pomdp)
