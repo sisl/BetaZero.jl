@@ -30,7 +30,7 @@ end
 
 @with_kw mutable struct BetaZeroNetworkParameters
     input_size = (30,30,5)
-    training_epochs = 300 # TODO: Change to 1000.
+    training_epochs = 1000
     normalize_target::Bool = true # Normalize target data to standard normal (0 mean)
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
     batchsize::Int = 512
@@ -44,8 +44,8 @@ end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 5
-    n_data_gen::Int = 100 # TODO: Change to ~ 100-1000
+    n_iterations::Int = 10
+    n_data_gen::Int = 100
     n_evaluate::Int = 5 # TODO: Change to 100
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
@@ -60,6 +60,9 @@ end
                                                 show_progress=false,
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a neural network lookup
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
+    collect_metrics::Bool = false # Indicate that performance metrics should be collected.
+    performance_metrics::Array = []
+    accuracy_func::Function = (pomdp,belief,state,action,returns)->nothing # (returns Bool): Function to indicate that the decision was "correct" (if applicable)
 end
 
 
@@ -286,7 +289,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
             @info "Generating data ($i/$(solver.n_data_gen)) with seed ($seed)"
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
-            data = run_simulation(pomdp, mcts_planner, up, b0, s0)
+            data, metrics = run_simulation(pomdp, solver, mcts_planner, up, b0, s0)
             B = []
             Z = []
             # Π = []
@@ -296,13 +299,16 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
                 # push!(Π, d.π) # TODO.
             end
             put!(channel, true) # trigger progress bar update
-            B, Z
+            B, Z, metrics
         end, 1:solver.n_data_gen)
 
     put!(channel, false) # tell printing task to finish
 
-    beliefs = vcat(first.(parallel_data)...) # combine all beliefs
-    returns = vcat(last.(parallel_data)...) # combine all returns
+    beliefs = vcat([d[1] for d in parallel_data]...) # combine all beliefs
+    returns = vcat([d[2] for d in parallel_data]...) # combine all returns
+    metrics = vcat([d[3] for d in parallel_data]...) # combine all metrics
+
+    push!(solver.performance_metrics, metrics...)
 
     ndims_belief = ndims(beliefs[1])
     X = cat(beliefs...; dims=ndims_belief+1)
@@ -327,11 +333,15 @@ end
 """
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
-function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0; max_steps=100)
+function run_simulation(pomdp::POMDP, solver::BetaZeroSolver, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0; max_steps=100)
     rewards = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
-    for (r,bp,t) in stepthrough(pomdp, policy, up, b0, s0, "r,bp,t", max_steps=max_steps)
+    local action
+    local T
+    for (a,r,bp,t) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t", max_steps=max_steps)
         @info "Simulation time step $t"
+        T = t
+        action = a
         push!(rewards, r)
         push!(data, BetaZeroTrainingData(b=input_representation(bp)))
     end
@@ -339,29 +349,41 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     γ = POMDPs.discount(pomdp)
     G = compute_returns(rewards; γ=γ)
 
-    # TODO: Remove
-    s_massive = s0.ore_map .>= pomdp.massive_threshold
-    massive = pomdp.dim_scale*sum(s_massive)
-
-    @show massive
-    @show G
-    @show rewards
-
     for (t,d) in enumerate(data)
         d.z = G[t]
     end
 
-    return data
+    metrics = compute_performance_metrics(pomdp, solver, data, b0, s0, action, T)
+
+    return data, metrics
 end
 
 
 """
-User defined method to collect performance and validation metrics during BetaZero policy iteration.
+Method to collect performance and validation metrics during BetaZero policy iteration.
+Note, user defines `solver.accuracy_func` to determine the accuracy of the final decision (if applicable).
 """
-function collect_metrics()
+function compute_performance_metrics(pomdp::POMDP, solver::BetaZeroSolver, data, b0, s0, action, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
+    metrics = nothing
+    if solver.collect_metrics
+        returns = [d.z for d in data]
+        discounted_return = returns[1]
+        accuracy = solver.accuracy_func(pomdp, b0, s0, action, returns) # NOTE: Problem specific, provide function to compute this
+        metrics = (discounted_return=discounted_return, accuracy=accuracy, num_actions=T)
+    end
+    return metrics
+end
+
+
+"""
+Save performance metrics to a file.
+"""
+function save_metrics(solver::BetaZeroSolver, filename::String)
+    metrics = solver.performance_metrics
+    BSON.@save filename metrics
 end
 
 

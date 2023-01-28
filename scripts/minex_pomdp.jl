@@ -32,4 +32,14 @@ b0 = POMDPs.initialize_belief(up, ds0)
 next_action = NextActionSampler()
 minexp_next_action(bmdp::BetaZero.BeliefMDP, b::MEBelief, h) = POMCPOW.next_action(next_action, bmdp.pomdp, b, h)
 
-# plot_mass_map(s0.ore_map, pomdp.massive_threshold; dim_scale=pomdp.dim_scale)[1]
+function minex_accuracy_func(pomdp::POMDP, belief, state, action, returns)
+    s_massive = state.ore_map .>= pomdp.massive_threshold
+    massive = pomdp.dim_scale*sum(s_massive)
+
+    truth = (massive >= pomdp.extraction_cost) ? :mine : :abandon
+    is_correct = action.type == truth
+
+    @show massive, is_correct
+
+    return is_correct
+end
