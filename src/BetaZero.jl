@@ -11,6 +11,7 @@ using POMDPSimulators
 using ProgressMeter
 using Random
 using Statistics
+using StatsBase
 
 include("belief_mdp.jl")
 include("representation.jl")
@@ -38,22 +39,23 @@ end
     λ_regularization::Float64 = 0.0001 # Parameter for L2-norm regularization
     loss_func::Function = Flux.Losses.mae # MAE works well for problems with large returns around zero, and spread out otherwise.
     device = gpu
-    verbose_update_frequency::Int = 1 # Frequency of printed training output
+    verbose_update_frequency::Int = training_epochs # Frequency of printed training output
     verbose_plot_frequency::Number = 10 # Frequency of plotted training/validation output
 end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 100
-    n_data_gen::Int = 100
-    n_evaluate::Int = 5 # TODO: Change to 100
+    n_iterations::Int = 10
+    n_data_gen::Int = 100 # TODO: 1000
+    n_evaluate::Int = 10 # TODO: Change to ~100
+    λ_ucb::Real = 0.1 # Upper confidence bound parameter: μ + λσ
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
     belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0
     # belief representation function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
-    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=10,
+    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=25,
                                                 check_repeat_action=true,
-                                                exploration_constant=100.0,
+                                                exploration_constant=10.0,
                                                 k_action=2.0,
                                                 alpha_action=0.25,
                                                 tree_in_info=true,
@@ -63,6 +65,7 @@ end
     collect_metrics::Bool = false # Indicate that performance metrics should be collected.
     performance_metrics::Array = []
     accuracy_func::Function = (pomdp,belief,state,action,returns)->nothing # (returns Bool): Function to indicate that the decision was "correct" (if applicable)
+    # verbose::Bool = false # Print out debugging/training/simulation information during solving
 end
 
 
@@ -84,14 +87,13 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         @info "BetaZero iteration $i/$(solver.n_iterations)"
 
         # 1) Generate data using the best BetaZero agent so far.
-        data = generate_data(pomdp, solver, f_prev; iter=i)
+        data = generate_data(pomdp, solver, f_prev; outer_iter=i)
 
         # 2) Optimize neural network parameters with recent simulated data.
-        f_curr = train_network(f_prev, data, solver.network_params)
+        f_curr = train_network(deepcopy(f_prev), data, solver.network_params)
 
         # 3) BetaZero agent is evaluated (compared to previous agent, beating it in in returns).
-        f_prev = f_curr
-        # f_prev = evaluate_agent(f_prev, f_curr) # TODO.
+        f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr)
     end
 
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f_prev)
@@ -125,7 +127,7 @@ function initialize_network(solver::BetaZeroSolver) # LeNet5
         Dense(num_dense2, out_dim),
     )
 
-    return nn_params.device(f)
+    return f
 end
 
 
@@ -231,39 +233,43 @@ end
 
 """
 Evaluate the neural network `f` using the `belief` as input.
+Note, inference is done on the CPU given a single input.
 """
 function value_lookup(nn_params, belief, f)
-    device = nn_params.device
+    # device = nn_params.device
     b = input_representation(belief)
     b = Float32.(b)
     x = Flux.unsqueeze(b; dims=ndims(b)+1)
-    x = device(x) # put data on CPU or GPU (i.e., `device`)
+    # x = device(x) # put data on CPU or GPU (i.e., `device`)
     y = f(x) # evaluate network `f`
     value = cpu(y)[1] # returns 1 element 1D array
     return value
 end
 
 
-function evaluate_agent(f_prev, f_curr; simulations=100)
-    prev_correct = 0
-    curr_correct = 0
-
+"""
+Compare previous and current neural networks using MCTS simulations.
+Use upper confidence bound on the discounted return as the comparison metric.
+"""
+function evaluate_agent(pomdp::POMDP, solver::BetaZeroSolver, f_prev, f_curr)
     # Run a number of simulations to evaluate the two neural networks using MCTS (`f_prev` and `f_curr`)
-    for i in 1:simulations
-        ans_prev = evaluate(f_prev; n_evaluate) # TODO.
-        ans_curr = evaluate(f_curr; n_evaluate) # TODO.
-        ans_true = truth() # TODO.
-        if ans_prev == ans_true
-            prev_correct += 1
-        end
-        if ans_curr == ans_true
-            curr_correct += 1
-        end
-    end
+    @info "Evaluting networks..."
+    returns_prev = generate_data(pomdp, solver, f_prev; inner_iter=solver.n_evaluate)[:G]
+    returns_curr = generate_data(pomdp, solver, f_curr; inner_iter=solver.n_evaluate)[:G]
 
-    if curr_correct >= prev_correct
+    λ = solver.λ_ucb
+    μ_prev, σ_prev = mean_and_std(returns_prev)
+    μ_curr, σ_curr = mean_and_std(returns_curr)
+    ucb_prev = μ_prev + λ*σ_prev
+    ucb_curr = μ_curr + λ*σ_curr
+
+    @show ucb_curr, ucb_prev
+
+    if ucb_curr >= ucb_prev
+        @info "<<<< New network performed better >>>>"
         return f_curr
     else
+        @info "---- Previous network performed better ----"
         return f_prev
     end
 end
@@ -272,7 +278,10 @@ end
 """
 Generate training data using online MCTS with the best network so far `f` (parallelized across episodes).
 """
-function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
+function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen)
+    # Place network back onto the CPU for inference
+    f = cpu(f)
+
     # Run MCTS to generate data using the neural network `f`
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
@@ -280,9 +289,9 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
     ds0 = POMDPs.initialstate_distribution(pomdp)
 
     # (nprocs() < nbatches) && addprocs(nbatches - nprocs())
-    @info "Number of processes: $(nprocs())"
+    # @info "Number of processes: $(nprocs())"
 
-    progress = Progress(solver.n_data_gen)
+    progress = Progress(inner_iter)
     channel = RemoteChannel(()->Channel{Bool}(), 1)
 
     @async while take!(channel)
@@ -290,37 +299,38 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; iter::Int=0)
     end
 
     @time parallel_data = pmap(i->begin
-            # TODO: Batches!
-            seed = parse(Int, string(iter, lpad(i, length(digits(solver.n_data_gen)), '0'))) # 1001, 1002, etc. for BetaZero iter=1
+            seed = parse(Int, string(outer_iter, lpad(i, length(digits(inner_iter)), '0'))) # 1001, 1002, etc. for BetaZero outer_iter=1
             Random.seed!(seed)
-            @info "Generating data ($i/$(solver.n_data_gen)) with seed ($seed)"
+            # @info "Generating data ($i/$(inner_iter)) with seed ($seed)"
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
             data, metrics = run_simulation(pomdp, solver, mcts_planner, up, b0, s0)
             B = []
             Z = []
             # Π = []
+            discounted_return = data[1].z
             for d in data
                 push!(B, d.b)
                 push!(Z, d.z)
                 # push!(Π, d.π) # TODO.
             end
             put!(channel, true) # trigger progress bar update
-            B, Z, metrics
-        end, 1:solver.n_data_gen)
+            B, Z, metrics, discounted_return
+        end, 1:inner_iter)
 
     put!(channel, false) # tell printing task to finish
 
     beliefs = vcat([d[1] for d in parallel_data]...) # combine all beliefs
     returns = vcat([d[2] for d in parallel_data]...) # combine all returns
     metrics = vcat([d[3] for d in parallel_data]...) # combine all metrics
+    G = vcat([d[4] for d in parallel_data]...) # combine all final returns
 
     push!(solver.performance_metrics, metrics...)
 
     ndims_belief = ndims(beliefs[1])
     X = cat(beliefs...; dims=ndims_belief+1)
     Y = reshape(Float32.(returns), 1, length(returns))
-    return (X=X, Y=Y)
+    return (X=X, Y=Y, G=G)
 end
 
 
@@ -346,7 +356,7 @@ function run_simulation(pomdp::POMDP, solver::BetaZeroSolver, policy::POMDPs.Pol
     local action
     local T
     for (a,r,bp,t) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t", max_steps=max_steps)
-        @info "Simulation time step $t"
+        # @info "Simulation time step $t"
         T = t
         action = a
         push!(rewards, r)

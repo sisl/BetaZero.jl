@@ -38,8 +38,6 @@ function minex_accuracy_func(pomdp::POMDP, belief, state, action, returns)
 
     truth = (massive >= pomdp.extraction_cost) ? :mine : :abandon
     is_correct = action.type == truth
-
-    @show massive, is_correct
-
+    # @show massive, is_correct
     return is_correct
 end
