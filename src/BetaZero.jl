@@ -46,8 +46,8 @@ end
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
     n_iterations::Int = 10
-    n_data_gen::Int = 100 # TODO: 1000
-    n_evaluate::Int = 10 # TODO: Change to ~100
+    n_data_gen::Int = 500
+    n_evaluate::Int = 50
     λ_ucb::Real = 0.1 # Upper confidence bound parameter: μ + λσ
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
@@ -327,8 +327,13 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=
 
     push!(solver.performance_metrics, metrics...)
 
-    ndims_belief = ndims(beliefs[1])
-    X = cat(beliefs...; dims=ndims_belief+1)
+    # Much faster than `cat(belief...; dims=4)`
+    belief = beliefs[1]
+    X = Array{Float32}(undef, size(belief)..., length(beliefs))
+    for i in 1:length(beliefs)
+        # Generalize for any size matrix (equivalent to X[:,:,:,i] = beliefs[i] for 3D matrix)
+        setindex!(X, beliefs[i], map(d->1:d, size(belief))..., i)
+    end
     Y = reshape(Float32.(returns), 1, length(returns))
     return (X=X, Y=Y, G=G)
 end
