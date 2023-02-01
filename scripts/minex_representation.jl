@@ -6,7 +6,13 @@ data_kurtosis(D) = [kurtosis(D[x,y,1:end-1]) for x in 1:size(D,1), y in 1:size(D
 
 
 function convert2data(b::MEBelief)
-    states = cat([p.ore_map[:,:,1] for p in particles(b)]..., dims=3)
+    P = particles(b)
+    grid_dims = size(P[1].ore_map)[1:2]
+    N = length(P)
+    states = Array{Float32}(undef, grid_dims..., N)
+    for i in 1:N
+        states[:,:,i] = P[i].ore_map[:,:,1]
+    end
     observations = zeros(size(states)[1:2])
     for (i,a) in enumerate(b.acts)
         if a.type == :drill

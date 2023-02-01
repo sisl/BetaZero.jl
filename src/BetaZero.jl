@@ -80,7 +80,7 @@ end
 The main BetaZero policy iteration algorithm.
 """
 function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
-    solver.bmdp = BeliefMDP(pomdp, solver.updater, solver.belief_reward)
+    fill_bmdp!(pomdp, solver)
     f_prev = initialize_network(solver)
 
     @time for i in 1:solver.n_iterations
@@ -101,6 +101,15 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
     policy = BetaZeroPolicy(f_prev, mcts_planner)
 
     return policy
+end
+
+
+"""
+Conver the `POMDP` to a `BeliefMDP` and set the `pomdp.bmdp` field.
+"""
+function fill_bmdp!(pomdp::POMDP, solver::BetaZeroSolver)
+    solver.bmdp = BeliefMDP(pomdp, solver.updater, solver.belief_reward)
+    return solver.bmdp
 end
 
 
@@ -283,6 +292,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=
     f = cpu(f)
 
     # Run MCTS to generate data using the neural network `f`
+    isnothing(solver.bmdp) && fill_bmdp!(pomdp, solver)
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     up = solver.updater
@@ -330,7 +340,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=
     # Much faster than `cat(belief...; dims=4)`
     belief = beliefs[1]
     X = Array{Float32}(undef, size(belief)..., length(beliefs))
-    for i in 1:length(beliefs)
+    for i in eachindex(beliefs)
         # Generalize for any size matrix (equivalent to X[:,:,:,i] = beliefs[i] for 3D matrix)
         setindex!(X, beliefs[i], map(d->1:d, size(belief))..., i)
     end
@@ -356,7 +366,7 @@ end
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
 function run_simulation(pomdp::POMDP, solver::BetaZeroSolver, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0; max_steps=100)
-    rewards = [0.0]
+    rewards::Vector{Float64} = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     local action
     local T
