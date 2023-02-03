@@ -10,6 +10,7 @@ end
 solver = BetaZeroSolver(updater=up,
                         belief_reward=(pomdp::POMDP, b, a, bp)->mean(reward(pomdp, s, a) for s in particles(b)),
                         collect_metrics=true,
+                        verbose=true,
                         accuracy_func=minex_accuracy_func)
 solver.mcts_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
 solver.network_params.input_size = size(BetaZero.input_representation(b0)) # TODO: Automatically infer from initial belief
