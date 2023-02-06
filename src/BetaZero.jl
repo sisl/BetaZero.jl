@@ -106,18 +106,18 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
     f_prev = initialize_network(solver)
 
     @conditional_time solver.verbose for i in 1:solver.n_iterations
-        solver.verbose && println(); @info "BetaZero iteration $i/$(solver.n_iterations)"
+        solver.verbose && println(); println("—"^40); println(); @info "BetaZero iteration $i/$(solver.n_iterations)"
 
-        # 0) Evaluate performance on a holdout test set (never used for training or network selection)
+        # 0) Evaluate performance on a holdout test set (never used for training or network selection).
         run_holdout_test!(pomdp, solver, f_prev)
 
-        # 1) Generate data using the best BetaZero agent so far.
+        # 1) Generate data using the best BetaZero agent so far: {[belief, return], ...}
         data = generate_data(pomdp, solver, f_prev; outer_iter=i)
 
-        # 2) Optimize neural network parameters with recent simulated data.
+        # 2) Optimize neural network parameters with recent simulated data (to estimate value given belief).
         f_curr = train_network(deepcopy(f_prev), data, solver.network_params; verbose=solver.verbose)
 
-        # 3) BetaZero agent is evaluated (compared to previous agent, beating it in returns).
+        # 3) Evaluate BetaZero agent (compare to previous agent based on mean returns).
         f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=typemax(Int32)+i)
     end
 
