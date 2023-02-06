@@ -263,8 +263,8 @@ function train_network(f, data, nn_params::BetaZeroNetworkParameters; verbose::B
 
         value_model = (cpu(f(x_valid))' .* std_y) .+ mean_y
         value_data = (cpu(y_valid)' .* std_y) .+ mean_y
-        value_distribution = histogram(value_model, alpha=0.5, label="model", c=3)
-        histogram!(value_data, alpha=0.5, label="data", c=4)
+        value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=3)
+        Plots.histogram!(value_data, alpha=0.5, label="data", c=4)
         display(value_distribution)
     end
 
@@ -306,27 +306,32 @@ Use upper confidence bound on the discounted return as the comparison metric.
 """
 function evaluate_agent(pomdp::POMDP, solver::BetaZeroSolver, f_prev, f_curr; outer_iter=0)
     # Run a number of simulations to evaluate the two neural networks using MCTS (`f_prev` and `f_curr`)
-    solver.verbose && @info "Evaluting networks..."
-    returns_prev = generate_data(pomdp, solver, f_prev; inner_iter=solver.n_evaluate, outer_iter=outer_iter)[:G]
-    returns_curr = generate_data(pomdp, solver, f_curr; inner_iter=solver.n_evaluate, outer_iter=outer_iter)[:G]
-
-    λ = solver.λ_ucb
-    μ_prev, σ_prev = mean_and_std(returns_prev)
-    μ_curr, σ_curr = mean_and_std(returns_curr)
-    ucb_prev = μ_prev + λ*σ_prev
-    ucb_curr = μ_curr + λ*σ_curr
-
-    solver.verbose && @show ucb_curr, ucb_prev
-
-    if ucb_curr > ucb_prev
-        solver.verbose && @info "<<<< New network performed better >>>>"
+    if solver.n_evaluate == 0
+        solver.verbose && @info "Skipping network evaluations, selected newest network."
         return f_curr
     else
-        if solver.verbose && ucb_curr == ucb_prev
-            @info "[IDENTICAL UCBs]"
+        solver.verbose && @info "Evaluting networks..."
+        returns_prev = generate_data(pomdp, solver, f_prev; inner_iter=solver.n_evaluate, outer_iter=outer_iter)[:G]
+        returns_curr = generate_data(pomdp, solver, f_curr; inner_iter=solver.n_evaluate, outer_iter=outer_iter)[:G]
+
+        λ = solver.λ_ucb
+        μ_prev, σ_prev = mean_and_std(returns_prev)
+        μ_curr, σ_curr = mean_and_std(returns_curr)
+        ucb_prev = μ_prev + λ*σ_prev
+        ucb_curr = μ_curr + λ*σ_curr
+
+        solver.verbose && @show ucb_curr, ucb_prev
+
+        if ucb_curr > ucb_prev
+            solver.verbose && @info "<<<< New network performed better >>>>"
+            return f_curr
+        else
+            if solver.verbose && ucb_curr == ucb_prev
+                @info "[IDENTICAL UCBs]"
+            end
+            solver.verbose && @info "---- Previous network performed better ----"
+            return f_prev
         end
-        solver.verbose && @info "---- Previous network performed better ----"
-        return f_prev
     end
 end
 
