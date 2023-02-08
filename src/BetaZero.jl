@@ -1,6 +1,7 @@
 module BetaZero
 
 using BSON
+using DataStructures
 using Distributed
 using Flux
 using MCTS
@@ -32,7 +33,8 @@ end
 
 @with_kw mutable struct BetaZeroNetworkParameters
     input_size = (30,30,5)
-    training_epochs = 1000
+    training_epochs::Int = 1000 # Number of SGD training updates
+    n_samples::Int = 10_000 # Number of samples (i.e., time steps) to use during training + validation
     normalize_target::Bool = true # Normalize target data to standard normal (0 mean)
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
     batchsize::Int = 512
@@ -47,15 +49,17 @@ end
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
     n_iterations::Int = 10 # BetaZero policy iterations (primary outer loop).
-    n_data_gen::Int   = 100 # Number of episodes to run for training/validation data generation.
-    n_evaluate::Int   = 25 # Number of episodes to run for network evaluation and comparison.
-    n_holdout::Int    = 10 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
-    λ_ucb::Real       = 0.0 # Upper confidence bound parameter: μ + λσ
+    n_data_gen::Int = 100 # Number of episodes to run for training/validation data generation.
+    n_evaluate::Int = 0 # Number of episodes to run for network evaluation and comparison.
+    n_holdout::Int = 50 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
+    n_buffer::Int = 5000 # Number of simulations to keep data for network training (NOTE: each simulation has multiple time steps of data)
+    data_buffer::CircularBuffer = CircularBuffer(n_buffer) # Simulation data buffer for training (NOTE: each simulation has multiple time steps of data)
+    λ_ucb::Real = 0.0 # Upper confidence bound parameter: μ + λσ # TODO: Remove?
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
     belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0
     # belief representation function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
-    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=100,
+    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=500,
                                                 check_repeat_action=true,
                                                 exploration_constant=1.0, # 10.0
                                                 k_action=10.0, # 2
@@ -67,7 +71,8 @@ end
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a neural network lookup
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
-    performance_metrics::Array = []
+    performance_metrics::Array = [] # TODO: store_metrics for NON-HOLDOUT runs.
+    holdout_metrics::Array = [] # Metrics computed from holdout test set.
     accuracy_func::Function = (pomdp,belief,state,action,returns)->nothing # (returns Bool): Function to indicate that the decision was "correct" (if applicable)
     verbose::Bool = true # Print out debugging/training/simulation information during solving
 end
@@ -109,19 +114,21 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         solver.verbose && println(); println("—"^40); println(); @info "BetaZero iteration $i/$(solver.n_iterations)"
 
         # 0) Evaluate performance on a holdout test set (never used for training or network selection).
+        # run_holdout_test!(pomdp, solver, f_prev; outer_iter=i) # TODO: DEBUGGING
         run_holdout_test!(pomdp, solver, f_prev)
 
         # 1) Generate data using the best BetaZero agent so far: {[belief, return], ...}
-        data = generate_data(pomdp, solver, f_prev; outer_iter=i)
+        generate_data!(pomdp, solver, f_prev; outer_iter=i)
 
         # 2) Optimize neural network parameters with recent simulated data (to estimate value given belief).
-        f_curr = train_network(deepcopy(f_prev), data, solver.network_params; verbose=solver.verbose)
+        f_curr = train_network(deepcopy(f_prev), solver; verbose=solver.verbose)
 
         # 3) Evaluate BetaZero agent (compare to previous agent based on mean returns).
+        # f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=i) # TODO: DEBUGGING
         f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=typemax(Int32)+i)
     end
 
-    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f_prev)
+    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f_prev)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     policy = BetaZeroPolicy(f_prev, mcts_planner)
 
@@ -167,7 +174,9 @@ end
 """
 Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
 """
-function train_network(f, data, nn_params::BetaZeroNetworkParameters; verbose::Bool=false)
+function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
+    nn_params = solver.network_params
+    data = sample_data(solver.data_buffer, nn_params.n_samples) # sample `n_samples` from last `n_buffer` simulations.
     x_data, y_data = data.X, data.Y
 
     # Normalize target values close to the range of [-1, 1]
@@ -290,7 +299,7 @@ end
 Evaluate the neural network `f` using the `belief` as input.
 Note, inference is done on the CPU given a single input.
 """
-function value_lookup(nn_params, belief, f)
+function value_lookup(belief, f)
     b = input_representation(belief)
     b = Float32.(b)
     x = Flux.unsqueeze(b; dims=ndims(b)+1)
@@ -311,8 +320,8 @@ function evaluate_agent(pomdp::POMDP, solver::BetaZeroSolver, f_prev, f_curr; ou
         return f_curr
     else
         solver.verbose && @info "Evaluting networks..."
-        returns_prev = generate_data(pomdp, solver, f_prev; inner_iter=solver.n_evaluate, outer_iter=outer_iter)[:G]
-        returns_curr = generate_data(pomdp, solver, f_curr; inner_iter=solver.n_evaluate, outer_iter=outer_iter)[:G]
+        returns_prev = generate_data!(pomdp, solver, f_prev; inner_iter=solver.n_evaluate, outer_iter=outer_iter, store_data=false)[:G]
+        returns_curr = generate_data!(pomdp, solver, f_curr; inner_iter=solver.n_evaluate, outer_iter=outer_iter, store_data=false)[:G]
 
         λ = solver.λ_ucb
         μ_prev, σ_prev = mean_and_std(returns_prev)
@@ -339,19 +348,21 @@ end
 """
 Generate training data using online MCTS with the best network so far `f` (parallelized across episodes).
 """
-function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false)
+function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true)
     # Confirm that network is on the CPU for inference
     f = cpu(f)
 
     # Run MCTS to generate data using the neural network `f`
     isnothing(solver.bmdp) && fill_bmdp!(pomdp, solver)
-    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(solver.network_params, b, f)
+    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     up = solver.updater
     ds0 = POMDPs.initialstate_distribution(pomdp)
+    collect_metrics = solver.collect_metrics
+    accuracy_func = solver.accuracy_func
 
     # (nprocs() < nbatches) && addprocs(nbatches - nprocs())
-    # @info "Number of processes: $(nprocs())"
+    solver.verbose && @info "Number of processes: $(nprocs())"
 
     progress = Progress(inner_iter)
     channel = RemoteChannel(()->Channel{Bool}(), 1)
@@ -366,7 +377,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=
             # @info "Generating data ($i/$(inner_iter)) with seed ($seed)"
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
-            data, metrics = run_simulation(pomdp, solver, mcts_planner, up, b0, s0)
+            data, metrics = run_simulation(pomdp, mcts_planner, up, b0, s0; collect_metrics, accuracy_func)
             B = []
             Z = []
             # Π = []
@@ -399,6 +410,40 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=
         setindex!(X, beliefs[i], map(d->1:d, size(belief))..., i)
     end
     Y = reshape(Float32.(returns), 1, length(returns))
+
+    data = (X=X, Y=Y, G=G)
+
+    if store_data
+        # Store data in buffer for training
+        push!(solver.data_buffer, data)
+    end
+
+    return data
+end
+
+
+"""
+Uniformly sample data from buffer (with replacement).
+Note that the buffer is per-simulation with each simulation having multiple time steps.
+We want to sample `n` individual time steps across the simulations.
+"""
+function sample_data(data_buffer::CircularBuffer, n::Int)
+    sim_times = map(d->length(d.Y), data_buffer) # number of time steps in each simulation
+    data_buffer_indices = 1:length(data_buffer)
+    sampled_sims_indices = sample(data_buffer_indices, Weights(sim_times), n; replace=true) # weighted based on num. steps per sim (to keep with __overall__ uniform across time steps)
+    belief_size = size(data_buffer[1].X)[1:end-1]
+    X = Array{Float32}(undef, belief_size..., n)
+    Y = Array{Float32}(undef, 1, n)
+    G = Vector{Float32}(undef, n)
+    for (i,sim_i) in enumerate(sampled_sims_indices)
+        sim = data_buffer[sim_i]
+        T = length(sim.Y)
+        t = rand(1:T) # uniformly sample time from this simulation
+        belief_size_span = map(d->1:d, belief_size) # e.g., (1:30, 1:30, 1:5)
+        setindex!(X, getindex(sim.X, belief_size_span..., t), belief_size_span..., i) # general for any size matrix e.g., X[:,;,:,i] = sim.X[:,:,:,t]
+        Y[i] = sim.Y[t]
+        G[i] = sim.G[sim_i]
+    end
     return (X=X, Y=Y, G=G)
 end
 
@@ -419,7 +464,8 @@ end
 """
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
-function run_simulation(pomdp::POMDP, solver::BetaZeroSolver, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0; max_steps=100)
+function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0;
+                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing)
     rewards::Vector{Float64} = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     local action
@@ -439,7 +485,7 @@ function run_simulation(pomdp::POMDP, solver::BetaZeroSolver, policy::POMDPs.Pol
         d.z = G[t]
     end
 
-    metrics = compute_performance_metrics(pomdp, solver, data, b0, s0, action, T)
+    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, action, T) : nothing
 
     return data, metrics
 end
@@ -449,18 +495,14 @@ end
 Method to collect performance and validation metrics during BetaZero policy iteration.
 Note, user defines `solver.accuracy_func` to determine the accuracy of the final decision (if applicable).
 """
-function compute_performance_metrics(pomdp::POMDP, solver::BetaZeroSolver, data, b0, s0, action, T)
+function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, action, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
-    metrics = nothing
-    if solver.collect_metrics
-        returns = [d.z for d in data]
-        discounted_return = returns[1]
-        accuracy = solver.accuracy_func(pomdp, b0, s0, action, returns) # NOTE: Problem specific, provide function to compute this
-        metrics = (discounted_return=discounted_return, accuracy=accuracy, num_actions=T)
-    end
-    return metrics
+    returns = [d.z for d in data]
+    discounted_return = returns[1]
+    accuracy = accuracy_func(pomdp, b0, s0, action, returns) # NOTE: Problem specific, provide function to compute this
+    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T)
 end
 
 
@@ -470,9 +512,11 @@ Run a test on a holdout set to collect performance metrics during BetaZero polic
 function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0)
     if solver.n_holdout > 0
         solver.verbose && @info "Running holdout test..."
-        returns = generate_data(pomdp, solver, f; inner_iter=solver.n_holdout, outer_iter=outer_iter, store_metrics=true)[:G]
+        returns = generate_data!(pomdp, solver, f; inner_iter=solver.n_holdout, outer_iter=outer_iter, store_metrics=true, store_data=false)[:G]
         solver.verbose && display(UnicodePlots.histogram(returns))
-        solver.verbose && @show mean_and_std(returns)
+        μ, σ = mean_and_std(returns)
+        push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns))
+        solver.verbose && @show μ, σ
     end
 end
 
