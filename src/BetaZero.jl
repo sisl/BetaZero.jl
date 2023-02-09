@@ -8,6 +8,7 @@ using MCTS
 using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 using Parameters
 using POMDPs
+using POMDPTools
 using POMDPSimulators
 using ProgressMeter
 using Random
@@ -52,21 +53,22 @@ end
     n_data_gen::Int = 100 # Number of episodes to run for training/validation data generation.
     n_evaluate::Int = 0 # Number of episodes to run for network evaluation and comparison.
     n_holdout::Int = 50 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
-    n_buffer::Int = 5000 # Number of simulations to keep data for network training (NOTE: each simulation has multiple time steps of data)
+    n_buffer::Int = 5*n_data_gen # Number of simulations to keep data for network training (NOTE: each simulation has multiple time steps of data, not counted in this number)
     data_buffer::CircularBuffer = CircularBuffer(n_buffer) # Simulation data buffer for training (NOTE: each simulation has multiple time steps of data)
     λ_ucb::Real = 0.0 # Upper confidence bound parameter: μ + λσ # TODO: Remove?
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
     belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0
-    # belief representation function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
-    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=500,
+    # TODO: belief_representation::Function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
+    tree_in_info::Bool = false
+    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=100,
                                                 check_repeat_action=true,
-                                                exploration_constant=1.0, # 10.0
-                                                k_action=10.0, # 2
-                                                alpha_action=0.5, # 0.25
-                                                k_state=10.0, # 2
-                                                alpha_state=0.5, # 0.25
-                                                tree_in_info=false,
+                                                exploration_constant=1.0, # 1.0
+                                                k_action=2.0, # 10
+                                                alpha_action=0.25, # 0.5
+                                                k_state=10.0, # 10
+                                                alpha_state=0.1, # 0.5
+                                                tree_in_info=tree_in_info,
                                                 show_progress=false,
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a neural network lookup
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
@@ -360,6 +362,7 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
     ds0 = POMDPs.initialstate_distribution(pomdp)
     collect_metrics = solver.collect_metrics
     accuracy_func = solver.accuracy_func
+    tree_in_info = solver.tree_in_info
 
     # (nprocs() < nbatches) && addprocs(nbatches - nprocs())
     solver.verbose && @info "Number of processes: $(nprocs())"
@@ -377,7 +380,7 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
             # @info "Generating data ($i/$(inner_iter)) with seed ($seed)"
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
-            data, metrics = run_simulation(pomdp, mcts_planner, up, b0, s0; collect_metrics, accuracy_func)
+            data, metrics = run_simulation(pomdp, mcts_planner, up, b0, s0; collect_metrics, accuracy_func, tree_in_info)
             B = []
             Z = []
             # Π = []
@@ -465,17 +468,21 @@ end
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
 function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0;
-                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing)
+                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, tree_in_info::Bool=false)
     rewards::Vector{Float64} = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     local action
     local T
-    for (a,r,bp,t) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t", max_steps=max_steps)
+    trees::Vector{Union{MCTS.DPWTree,MCTS.MCTSTree}} = [] # TODO: Other MCTS Tree types
+    for (a,r,bp,t,info) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t,action_info", max_steps=max_steps)
         # @info "Simulation time step $t"
         T = t
         action = a
         push!(rewards, r)
         push!(data, BetaZeroTrainingData(b=input_representation(bp)))
+        if tree_in_info
+            push!(trees, info[:tree])
+        end
     end
 
     γ = POMDPs.discount(pomdp)
@@ -485,7 +492,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         d.z = G[t]
     end
 
-    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, action, T) : nothing
+    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, action, trees, T) : nothing
 
     return data, metrics
 end
@@ -495,14 +502,14 @@ end
 Method to collect performance and validation metrics during BetaZero policy iteration.
 Note, user defines `solver.accuracy_func` to determine the accuracy of the final decision (if applicable).
 """
-function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, action, T)
+function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, action, trees, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
     returns = [d.z for d in data]
     discounted_return = returns[1]
     accuracy = accuracy_func(pomdp, b0, s0, action, returns) # NOTE: Problem specific, provide function to compute this
-    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T)
+    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T, trees=trees, action=action)
 end
 
 
@@ -533,9 +540,8 @@ end
 """
 Get action from BetaZero policy (online MCTS using value & policy network).
 """
-function POMDPs.action(policy::BetaZeroPolicy, b)
-    return action(policy.planner, b)
-end
+POMDPs.action(policy::BetaZeroPolicy, b) = action(policy.planner, b)
+POMDPTools.action_info(policy::BetaZeroPolicy, b; tree_in_info=false) = POMDPTools.action_info(policy.planner, b; tree_in_info)
 
 
 end # module

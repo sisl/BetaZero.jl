@@ -20,5 +20,15 @@ POMDPs.solve(solver::OneStepLookaheadSolver, problem::Union{MDP,POMDP}) = OneSte
 Return an action from a one-step lookahead planner, based on maximum mean return.
 """
 function POMDPs.action(planner::OneStepLookaheadPlanner, s)
-
+    solver = planner.solver
+    tree = Dict()
+    A = actions(planner.problem, s)
+    branched_actions = rand(A, solver.n_actions)
+    for a in branched_actions
+        if a ∈ tree
+            obs = tree[a]
+        else
+            tree[a] = [] # initialize observation set
+        end
+    end
 end

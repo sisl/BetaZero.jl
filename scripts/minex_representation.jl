@@ -24,12 +24,16 @@ function convert2data(b::MEBelief)
 end
 
 
-function BetaZero.input_representation(b::MEBelief)
+function BetaZero.input_representation(b::MEBelief; use_higher_orders::Bool=true)
     D = convert2data(b)
     μ = mean(D[:,:,1:end-1], dims=3)[:,:,1]
     σ² = std(D[:,:,1:end-1], dims=3)[:,:,1]
-    sk = data_skewness(D)
-    kurt = data_kurtosis(D)
     obs = D[:,:,end]
-    return cat(μ, σ², sk, kurt, obs; dims=3)
+    if use_higher_orders
+        sk = data_skewness(D)
+        kurt = data_kurtosis(D)
+        return cat(μ, σ², sk, kurt, obs; dims=3)
+    else
+        return cat(μ, σ², obs; dims=3)
+    end
 end
