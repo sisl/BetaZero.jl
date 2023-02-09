@@ -474,7 +474,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     local action
     local T
     trees::Vector{Union{MCTS.DPWTree,MCTS.MCTSTree}} = [] # TODO: Other MCTS Tree types
-    for (a,r,bp,t,info) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t,action_info", max_steps=max_steps)
+    for (a,r,bp,t,info) in POMDPSimulators.stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t,action_info", max_steps=max_steps)
         # @info "Simulation time step $t"
         T = t
         action = a
