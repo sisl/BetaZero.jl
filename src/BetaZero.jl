@@ -149,8 +149,8 @@ end
 """
 Initialize policy & value network with random weights.
 """
-function initialize_network(solver::BetaZeroSolver) # LeNet5
-    nn_params = solver.network_params
+initialize_network(solver::BetaZeroSolver) = initialize_network(solver.network_params)
+function initialize_network(nn_params::BetaZeroNetworkParameters) # LeNet5
     input_size = nn_params.input_size
     filter = (5,5)
     num_filters1 = 6
@@ -533,6 +533,41 @@ Save performance metrics to a file.
 function save_metrics(solver::BetaZeroSolver, filename::String)
     metrics = solver.performance_metrics
     BSON.@save filename metrics
+end
+
+
+"""
+Save policy to file (MCTS planner and network objects together).
+"""
+function save_policy(policy::BetaZeroPolicy, filename::String)
+    BSON.@save "$filename" policy
+end
+
+
+"""
+Load policy from file (MCTS planner and network objects together).
+"""
+function load_policy(filename::String)
+    BSON.@load "$filename" policy
+    return policy
+end
+
+
+"""
+Save just the neural network to a file.
+"""
+function save_network(policy::BetaZeroPolicy, filename::String)
+    network = policy.network
+    BSON.@save "$filename" network
+end
+
+
+"""
+Load just the neural network from a file.
+"""
+function load_network(filename::String)
+    BSON.@load "$filename" network
+    return network
 end
 
 
