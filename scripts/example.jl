@@ -1,3 +1,4 @@
+Sys.islinux() && include("launch_remote.jl")
 using Revise
 using Distributed
 

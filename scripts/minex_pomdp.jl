@@ -26,7 +26,8 @@ initialize_data!(pomdp, N_INITIAL)
 ds0 = POMDPs.initialstate_distribution(pomdp)
 # s0 = rand(ds0; truth=true) # `truth` is only necessary when doing multi-fidelity MixedFidelityModelSelection analysis and `true_grid_dims` differs from `grid_dims`
 s0 = rand(ds0)
-up = MEBeliefUpdater(pomdp, 5000, 2.0; abc=true, abc_ϵ=1e-3)
+# up = MEBeliefUpdater(pomdp, 3000, 2.0; abc=true, abc_ϵ=1e-2)
+up = MEBeliefUpdater(pomdp, 1000, 2.0)
 b0 = POMDPs.initialize_belief(up, ds0)
 
 next_action = NextActionSampler()

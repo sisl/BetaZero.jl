@@ -48,11 +48,11 @@ end
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
-    n_iterations::Int = 10 # BetaZero policy iterations (primary outer loop).
+    n_iterations::Int = 20 # BetaZero policy iterations (primary outer loop).
     n_data_gen::Int = 100 # Number of episodes to run for training/validation data generation.
     n_evaluate::Int = 0 # Number of episodes to run for network evaluation and comparison.
     n_holdout::Int = 50 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
-    n_buffer::Int = 5*n_data_gen # Number of simulations to keep data for network training (NOTE: each simulation has multiple time steps of data, not counted in this number)
+    n_buffer::Int = 2 # Number of iterations to keep data for network training (NOTE: each simulation has multiple time steps of data, not counted in this number. This number corresponds to the number of iterations, i.e., set to 2 if you want to keep data from the previous 2 policy iterations.)
     data_buffer::CircularBuffer = CircularBuffer(n_buffer) # Simulation data buffer for training (NOTE: each simulation has multiple time steps of data)
     λ_ucb::Real = 0.0 # Upper confidence bound parameter: μ + λσ # TODO: Remove?
     updater::POMDPs.Updater
@@ -60,7 +60,7 @@ end
     belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0
     # TODO: belief_representation::Function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
     tree_in_info::Bool = false
-    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=100,
+    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=10,
                                                 check_repeat_action=true,
                                                 exploration_constant=1.0, # 1.0
                                                 k_action=2.0, # 10
