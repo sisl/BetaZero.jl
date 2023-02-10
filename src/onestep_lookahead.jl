@@ -2,6 +2,7 @@
     n_actions::Int = 20 # Number of actions to branch.
     n_obs::Int = 5 # Number of observations per action to branch (equal to number of belief updates)
     estimate_value::Function = b->0.0 # Leaf node value estimator
+    next_action::Union{Function,Nothing} = nothing # Next action sampler (TODO: Replace with policy head of network)
 end
 
 
@@ -26,11 +27,25 @@ function POMDPs.action(planner::OneStepLookaheadPlanner, s; include_info::Bool=f
     mdp = planner.mdp
     estimate_value = solver.estimate_value
     rng = planner.rng
+    tried_idxs = []
     tree = Dict()
     A = actions(mdp, s)
-    branched_actions = sample(A, min(solver.n_actions, length(A)); replace=false) # sample as many actions (without replacement) as requested
-    for a in branched_actions
-        tree[a] = (sp=[], q=[]) # initialize observation set
+    function get_action()
+        if isnothing(solver.next_action)
+            return sample(A, 1)
+        else
+            a = solver.next_action(mdp, s, tried_idxs)
+            push!(tried_idxs, nothing) # indicate that an action has been taken (see MineralExploration:solver.jl)
+            return a
+        end
+    end
+
+    # for a in branched_actions
+    for i in 1:solver.n_actions
+        a = get_action()
+        if !haskey(tree, a)
+            tree[a] = (sp=[], q=[]) # initialize observation set
+        end
         for _ in 1:solver.n_obs
             sp, r = @gen(:sp, :r)(mdp, s, a, rng)
             q = r + discount(mdp)*estimate_value(sp)

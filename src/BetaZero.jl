@@ -23,7 +23,8 @@ export
     BetaZeroSolver,
     BetaZeroPolicy,
     BetaZeroNetworkParameters,
-    BeliefMDP
+    BeliefMDP,
+    OneStepLookaheadSolver
 
 
 mutable struct BetaZeroPolicy <: POMDPs.Policy

@@ -14,6 +14,7 @@ solver = BetaZeroSolver(updater=up,
                         verbose=true,
                         accuracy_func=minex_accuracy_func)
 solver.mcts_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
+solver.onestep_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
 solver.network_params.input_size = size(BetaZero.input_representation(b0)) # TODO: Automatically infer from initial belief
 solver.network_params.verbose_plot_frequency = Inf # disable plotting on bend
 
