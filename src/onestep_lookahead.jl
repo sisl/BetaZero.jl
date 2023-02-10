@@ -1,15 +1,7 @@
-using Parameters
-using POMDPs
-using POMDPTools
-using ProgressMeter
-using Random
-using StatsBase
-
-
 @with_kw mutable struct OneStepLookaheadSolver <: POMDPs.Solver
     n_actions::Int = 20 # Number of actions to branch.
     n_obs::Int = 5 # Number of observations per action to branch (equal to number of belief updates)
-    estimate_value::Function = bp->0.0 # Leaf node value estimator
+    estimate_value::Function = b->0.0 # Leaf node value estimator
 end
 
 
@@ -50,11 +42,7 @@ function POMDPs.action(planner::OneStepLookaheadPlanner, s; include_info::Bool=f
     # select action based on maximum average Q-value
     best_a = reduce((a,a′) -> mean(tree[a].q) ≥ mean(tree[a′].q) ? a : a′, keys(tree))
 
-    if include_info
-        return best_a, tree
-    else
-        return best_a
-    end
+    return include_info ? (best_a, tree) : best_a
 end
 
 

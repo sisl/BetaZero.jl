@@ -17,6 +17,7 @@ using UnicodePlots
 
 include("belief_mdp.jl")
 include("representation.jl")
+include("onestep_lookahead.jl")
 
 export
     BetaZeroSolver,
@@ -59,7 +60,7 @@ end
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters() # parameters for training CNN
     belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0
     # TODO: belief_representation::Function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
-    tree_in_info::Bool = false
+    include_info::Bool = false # Include `action_info` in metrics when running POMDP simulation
     mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=10,
                                                 check_repeat_action=true,
                                                 exploration_constant=1.0, # 1.0
@@ -67,9 +68,13 @@ end
                                                 alpha_action=0.25, # 0.5
                                                 k_state=10.0, # 10
                                                 alpha_state=0.1, # 0.5
-                                                tree_in_info=tree_in_info,
+                                                tree_in_info=false,
                                                 show_progress=false,
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a neural network lookup
+    onestep_solver::OneStepLookaheadSolver = OneStepLookaheadSolver(n_actions=5,
+                                                                    n_obs=2,
+                                                                    estimate_value=b->0.0)
+    use_onestep_lookahead_holdout::Bool = true # Use greedy one-step lookahead solver when checking performance on the holdout set
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
     performance_metrics::Array = [] # TODO: store_metrics for NON-HOLDOUT runs.
@@ -119,7 +124,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         run_holdout_test!(pomdp, solver, f_prev)
 
         # 1) Generate data using the best BetaZero agent so far: {[belief, return], ...}
-        generate_data!(pomdp, solver, f_prev; outer_iter=i)
+        generate_data!(pomdp, solver, f_prev; inner_iter=solver.n_data_gen, outer_iter=i)
 
         # 2) Optimize neural network parameters with recent simulated data (to estimate value given belief).
         f_curr = train_network(deepcopy(f_prev), solver; verbose=solver.verbose)
@@ -243,7 +248,7 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
     accs_train = []
     accs_valid = []
     verbose && @info "Beginning training $(size(x_train))"
-    for e in 1:training_epochs
+    @conditional_time verbose for e in 1:training_epochs
         for (x, y) in train_data
             _, back = Flux.pullback(() -> loss(x, y), θ)
             Flux.update!(opt, θ, back(1.0f0))
@@ -310,6 +315,33 @@ function value_lookup(belief, f)
 end
 
 
+
+"""
+Uniformly sample data from buffer (with replacement).
+Note that the buffer is per-simulation with each simulation having multiple time steps.
+We want to sample `n` individual time steps across the simulations.
+"""
+function sample_data(data_buffer::CircularBuffer, n::Int)
+    sim_times = map(d->length(d.Y), data_buffer) # number of time steps in each simulation
+    data_buffer_indices = 1:length(data_buffer)
+    sampled_sims_indices = sample(data_buffer_indices, Weights(sim_times), n; replace=true) # weighted based on num. steps per sim (to keep with __overall__ uniform across time steps)
+    belief_size = size(data_buffer[1].X)[1:end-1]
+    X = Array{Float32}(undef, belief_size..., n)
+    Y = Array{Float32}(undef, 1, n)
+    G = Vector{Float32}(undef, n)
+    for (i,sim_i) in enumerate(sampled_sims_indices)
+        sim = data_buffer[sim_i]
+        T = length(sim.Y)
+        t = rand(1:T) # uniformly sample time from this simulation
+        belief_size_span = map(d->1:d, belief_size) # e.g., (1:30, 1:30, 1:5)
+        setindex!(X, getindex(sim.X, belief_size_span..., t), belief_size_span..., i) # general for any size matrix e.g., X[:,;,:,i] = sim.X[:,:,:,t]
+        Y[i] = sim.Y[t]
+        G[i] = sim.G[sim_i]
+    end
+    return (X=X, Y=Y, G=G)
+end
+
+
 """
 Compare previous and current neural networks using MCTS simulations.
 Use upper confidence bound on the discounted return as the comparison metric.
@@ -349,23 +381,29 @@ end
 """
 Generate training data using online MCTS with the best network so far `f` (parallelized across episodes).
 """
-function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true)
+function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true, use_onestep_lookahead::Bool=false)
     # Confirm that network is on the CPU for inference
     f = cpu(f)
 
-    # Run MCTS to generate data using the neural network `f`
     isnothing(solver.bmdp) && fill_bmdp!(pomdp, solver)
-    solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f)
-    mcts_planner = solve(solver.mcts_solver, solver.bmdp)
+
+    if use_onestep_lookahead
+        # Use greedy one-step lookahead with neural network `f`
+        solver.onestep_solver.estimate_value = b->value_lookup(b, f)
+        planner = solve(solver.onestep_solver, solver.bmdp)
+    else
+        # Run MCTS to generate data using the neural network `f`
+        solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f)
+        planner = solve(solver.mcts_solver, solver.bmdp)
+    end
+
     up = solver.updater
     ds0 = POMDPs.initialstate_distribution(pomdp)
     collect_metrics = solver.collect_metrics
     accuracy_func = solver.accuracy_func
-    tree_in_info = solver.tree_in_info
+    include_info = solver.include_info
 
-    # (nprocs() < nbatches) && addprocs(nbatches - nprocs())
     solver.verbose && @info "Number of processes: $(nprocs())"
-
     progress = Progress(inner_iter)
     channel = RemoteChannel(()->Channel{Bool}(), 1)
 
@@ -379,7 +417,7 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
             # @info "Generating data ($i/$(inner_iter)) with seed ($seed)"
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
-            data, metrics = run_simulation(pomdp, mcts_planner, up, b0, s0; collect_metrics, accuracy_func, tree_in_info)
+            data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info)
             B = []
             Z = []
             # Π = []
@@ -425,32 +463,6 @@ end
 
 
 """
-Uniformly sample data from buffer (with replacement).
-Note that the buffer is per-simulation with each simulation having multiple time steps.
-We want to sample `n` individual time steps across the simulations.
-"""
-function sample_data(data_buffer::CircularBuffer, n::Int)
-    sim_times = map(d->length(d.Y), data_buffer) # number of time steps in each simulation
-    data_buffer_indices = 1:length(data_buffer)
-    sampled_sims_indices = sample(data_buffer_indices, Weights(sim_times), n; replace=true) # weighted based on num. steps per sim (to keep with __overall__ uniform across time steps)
-    belief_size = size(data_buffer[1].X)[1:end-1]
-    X = Array{Float32}(undef, belief_size..., n)
-    Y = Array{Float32}(undef, 1, n)
-    G = Vector{Float32}(undef, n)
-    for (i,sim_i) in enumerate(sampled_sims_indices)
-        sim = data_buffer[sim_i]
-        T = length(sim.Y)
-        t = rand(1:T) # uniformly sample time from this simulation
-        belief_size_span = map(d->1:d, belief_size) # e.g., (1:30, 1:30, 1:5)
-        setindex!(X, getindex(sim.X, belief_size_span..., t), belief_size_span..., i) # general for any size matrix e.g., X[:,;,:,i] = sim.X[:,:,:,t]
-        Y[i] = sim.Y[t]
-        G[i] = sim.G[sim_i]
-    end
-    return (X=X, Y=Y, G=G)
-end
-
-
-"""
 Compute the discounted `γ` returns from reward vector `R`.
 """
 function compute_returns(R; γ=1)
@@ -467,20 +479,20 @@ end
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
 function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0;
-                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, tree_in_info::Bool=false)
+                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, include_info::Bool=false)
     rewards::Vector{Float64} = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     local action
     local T
-    trees::Vector{Union{MCTS.DPWTree,MCTS.MCTSTree}} = [] # TODO: Other MCTS Tree types
+    infos::Vector = []
     for (a,r,bp,t,info) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t,action_info", max_steps=max_steps)
         # @info "Simulation time step $t"
         T = t
         action = a
         push!(rewards, r)
         push!(data, BetaZeroTrainingData(b=input_representation(bp)))
-        if tree_in_info
-            push!(trees, info[:tree])
+        if include_info
+            push!(infos, info)
         end
     end
 
@@ -491,7 +503,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         d.z = G[t]
     end
 
-    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, action, trees, T) : nothing
+    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, action, infos, T) : nothing
 
     return data, metrics
 end
@@ -501,14 +513,14 @@ end
 Method to collect performance and validation metrics during BetaZero policy iteration.
 Note, user defines `solver.accuracy_func` to determine the accuracy of the final decision (if applicable).
 """
-function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, action, trees, T)
+function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, action, infos, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
     returns = [d.z for d in data]
     discounted_return = returns[1]
     accuracy = accuracy_func(pomdp, b0, s0, action, returns) # NOTE: Problem specific, provide function to compute this
-    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T, trees=trees, action=action)
+    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T, infos=infos, action=action)
 end
 
 
@@ -518,7 +530,10 @@ Run a test on a holdout set to collect performance metrics during BetaZero polic
 function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0)
     if solver.n_holdout > 0
         solver.verbose && @info "Running holdout test..."
-        returns = generate_data!(pomdp, solver, f; inner_iter=solver.n_holdout, outer_iter=outer_iter, store_metrics=true, store_data=false)[:G]
+        returns = generate_data!(pomdp, solver, f;
+                                 inner_iter=solver.n_holdout, outer_iter=outer_iter,
+                                 store_metrics=true, store_data=false,
+                                 use_onestep_lookahead=solver.use_onestep_lookahead_holdout)[:G]
         solver.verbose && display(UnicodePlots.histogram(returns))
         μ, σ = mean_and_std(returns)
         push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns))

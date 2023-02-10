@@ -7,8 +7,8 @@ using Random
 Random.seed!(7) # determinism (truth 30x30: ~230.56 ore volume)
 
 N_INITIAL = 0
-MAX_BORES = 25
 MIN_BORES = 5
+MAX_BORES = 25
 GRID_SPACING = 0
 MAX_MOVEMENT = 20
 
