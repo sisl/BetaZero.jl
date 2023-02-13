@@ -32,7 +32,7 @@ function POMDPs.action(planner::OneStepLookaheadPlanner, s; include_info::Bool=f
     A = actions(mdp, s)
     function get_action()
         if isnothing(solver.next_action)
-            return sample(A, 1)
+            return rand(A)
         else
             a = solver.next_action(mdp, s, tried_idxs)
             push!(tried_idxs, nothing) # indicate that an action has been taken (see MineralExploration:solver.jl)

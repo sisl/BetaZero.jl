@@ -1,5 +1,6 @@
 module BetaZero
 
+using BeliefUpdaters
 using BSON
 using DataStructures
 using Distributed
@@ -76,6 +77,7 @@ end
                                                                     n_obs=2,
                                                                     estimate_value=b->0.0)
     use_onestep_lookahead_holdout::Bool = true # Use greedy one-step lookahead solver when checking performance on the holdout set
+    use_random_policy_data_gen::Bool = true # Use random policy for data generation
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
     performance_metrics::Array = [] # TODO: store_metrics for NON-HOLDOUT runs.
@@ -125,7 +127,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         run_holdout_test!(pomdp, solver, f_prev)
 
         # 1) Generate data using the best BetaZero agent so far: {[belief, return], ...}
-        generate_data!(pomdp, solver, f_prev; inner_iter=solver.n_data_gen, outer_iter=i)
+        generate_data!(pomdp, solver, f_prev; use_random_policy=solver.use_random_policy_data_gen, inner_iter=solver.n_data_gen, outer_iter=i)
 
         # 2) Optimize neural network parameters with recent simulated data (to estimate value given belief).
         f_curr = train_network(deepcopy(f_prev), solver; verbose=solver.verbose)
@@ -133,6 +135,11 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         # 3) Evaluate BetaZero agent (compare to previous agent based on mean returns).
         # f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=i) # TODO: DEBUGGING
         f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=typemax(Int32)+i)
+    end
+
+    if solver.n_iterations == 1
+        # Re-run holdout test if only running for a single iteration
+        run_holdout_test!(pomdp, solver, f_prev)
     end
 
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f_prev)
@@ -382,13 +389,15 @@ end
 """
 Generate training data using online MCTS with the best network so far `f` (parallelized across episodes).
 """
-function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true, use_onestep_lookahead::Bool=false)
+function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true, use_onestep_lookahead::Bool=false, use_random_policy::Bool=false)
     # Confirm that network is on the CPU for inference
     f = cpu(f)
 
     isnothing(solver.bmdp) && fill_bmdp!(pomdp, solver)
 
-    if use_onestep_lookahead
+    if use_random_policy
+        planner = RandomPolicy(Random.GLOBAL_RNG, pomdp, PreviousObservationUpdater())
+    elseif use_onestep_lookahead
         # Use greedy one-step lookahead with neural network `f`
         solver.onestep_solver.estimate_value = b->value_lookup(b, f)
         planner = solve(solver.onestep_solver, solver.bmdp)
