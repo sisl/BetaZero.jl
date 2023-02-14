@@ -19,7 +19,7 @@ end
     # Base.:(+)(s1::LightDark1DState, s2::LightDark1DState) = LightDark1DState(s1.status + s2.status, s1.y + s2.y)
     # Base.:(/)(s::LightDark1DState, i::Int) = LightDark1DState(s.status, s.y/i)
 
-    POMDPs.actions(::LightDark1D) = [-10, -5, -1, 0, 1, 5, 10] # -10:10
+    POMDPs.actions(::LightDark1D) = -10:10 # [-10, -5, -1, 0, 1, 5, 10]
 
     function POMDPs.transition(p::LightDark1D, s::LightDark1DState, a::Int)
         if a == 0
@@ -31,8 +31,14 @@ end
     end
 
     function POMDPs.reward(p::LightDark1D, s::LightDark1DState, a::Int)
-        if a == 0
-            return s == 0 ? p.correct_r : p.incorrect_r
+        if s.status < 0
+            return 0.0
+        elseif a == 0
+            if abs(s.y) < 1
+                return p.correct_r
+            else
+                return p.incorrect_r
+            end
         else
             return -p.movement_cost
         end
@@ -52,7 +58,6 @@ end
             return rand(A)
         end
     end
-
 
     #========== BetaZero ==========#
     # Interface:
