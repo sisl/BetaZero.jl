@@ -36,8 +36,8 @@ end
 
 @with_kw mutable struct BetaZeroNetworkParameters
     input_size = (30,30,5)
-    training_epochs::Int = 1000 # Number of SGD training updates
-    n_samples::Int = 10_000 # Number of samples (i.e., time steps) to use during training + validation
+    training_epochs::Int = 1000 # Number of network training updates
+    n_samples::Int = 10_000 # Number of samples (i.e., simulated POMDP time steps from data collection) to use during training + validation
     normalize_target::Bool = true # Normalize target data to standard normal (0 mean)
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
     batchsize::Int = 512
@@ -189,13 +189,19 @@ end
 """
 Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
 """
-function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
+function train_network(f, solver::BetaZeroSolver; verbose::Bool=false, results=nothing)
     nn_params = solver.network_params
+    lr = nn_params.learning_rate
+    λ = nn_params.λ_regularization
+    loss_str = string(nn_params.loss_func)
+    normalize_target = nn_params.normalize_target
+    key = (lr, λ, loss_str, normalize_target)
+
     data = sample_data(solver.data_buffer, nn_params.n_samples) # sample `n_samples` from last `n_buffer` simulations.
     x_data, y_data = data.X, data.Y
 
     # Normalize target values close to the range of [-1, 1]
-    if nn_params.normalize_target
+    if normalize_target
         mean_y = mean(y_data)
         std_y = std(y_data)
         y_data = (y_data .- mean_y) ./ std_y
@@ -235,21 +241,21 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
 
     # Remove un-normalization layer (if added from previous iteration)
     # We want to train for values close to [-1, 1]
-    if isa(f.layers[end], Function) && nn_params.normalize_target
+    if isa(f.layers[end], Function) && normalize_target
         f = Chain(f.layers[1:end-1]...)
     end
 
     # Put network on GPU for training
     f = device(f)
 
-    sqnorm(x) = sum(abs2, x)
-    penalty() = nn_params.λ_regularization*sum(sqnorm, Flux.params(f))
-    accuracy(x, y) = mean(sign.(f(x)) .== sign.(y))
-    loss(x, y) = nn_params.loss_func(f(x), y) + penalty()
-
     # TODO: Include action/policy vector and change loss to include CE-loss
 
-    opt = ADAM(nn_params.learning_rate)
+    sqnorm(x) = sum(abs2, x)
+    penalty() = λ*sum(sqnorm, Flux.params(f))
+    sign_accuracy(x, y) = mean(sign.(f(x)) .== sign.(y)) # TODO: Generalize
+    loss(x, y) = nn_params.loss_func(f(x), y) + penalty()
+
+    opt = Adam(lr)
     θ = Flux.params(f)
 
     training_epochs = nn_params.training_epochs
@@ -265,8 +271,8 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
         end
         loss_train = loss(x_train, y_train)
         loss_valid = loss(x_valid, y_valid)
-        acc_train = accuracy(x_train, y_train)
-        acc_valid = accuracy(x_valid, y_valid)
+        acc_train = sign_accuracy(x_train, y_train)
+        acc_valid = sign_accuracy(x_valid, y_valid)
         push!(losses_train, loss_train)
         push!(losses_valid, loss_valid)
         push!(accs_train, acc_train)
@@ -276,26 +282,52 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
         end
         if e % nn_params.verbose_plot_frequency == 0
             # TODO: Generalize
-            plot(xlims=(1, training_epochs), ylims=(0, 1))
+            plot(xlims=(1, training_epochs), ylims=(0, 1), title="learning curve: $key")
             plot!(1:e, losses_train, label="training")
             plot!(1:e, losses_valid, label="validation")
             display(plot!())
         end
     end
 
-    if nn_params.verbose_plot_frequency != Inf
-        learning_curve = plot!()
-        display(learning_curve)
+    # Check value distributions of model and data
+    value_model = cpu(f(x_valid))'
+    value_data = cpu(y_valid)'
+    if normalize_target
+        value_model = (value_model .* std_y) .+ mean_y
+        value_data = (value_data .* std_y) .+ mean_y
+    end
 
-        value_model = cpu(f(x_valid))'
-        value_data = cpu(y_valid)'
-        if nn_params.normalize_target
-            value_model = (value_model .* std_y) .+ mean_y
-            value_data = (value_data .* std_y) .+ mean_y
+    if nn_params.verbose_plot_frequency != Inf
+        learning_curve = nothing
+        value_distribution = nothing
+        try
+            learning_curve = plot!()
+            display(learning_curve)
+            value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=:gray, title="values: $key")
+            Plots.histogram!(value_data, alpha=0.5, label="data", c=:navy)
+            display(value_distribution)
+        catch err
+            @warn "Error in plotting learning curve and value distribution: $err"
         end
-        value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=3)
-        Plots.histogram!(value_data, alpha=0.5, label="data", c=4)
-        display(value_distribution)
+    end
+
+    # Save training results
+    if !isnothing(results) && isa(results, Dict)
+        results[key] = Dict(
+            "losses_train" => losses_train,
+            "losses_valid" => losses_valid,
+            "accs_train" => accs_train,
+            "accs_valid" => accs_valid,
+            "value_model" => value_model,
+            "value_data" => value_data,
+            "curve" => learning_curve,
+            "value_distribution" => value_distribution,
+        )
+
+        if nn_params.verbose_plot_frequency != Inf
+            results[key]["curve"] = learning_curve
+            results[key]["value_distribution"] = value_distribution
+        end
     end
 
     # Place network on the CPU (better GPU memory conservation when doing parallelized inference)
@@ -308,7 +340,7 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
         Flux.CUDA.reclaim()
     end
 
-    if nn_params.normalize_target
+    if normalize_target
         # Add un-normalization layer
         unnormalize = y -> (y .* std_y) .+ mean_y
         f = Chain(f.layers..., unnormalize)
@@ -401,14 +433,14 @@ Generate training data using online MCTS with the best network so far `f` (paral
 function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true, use_onestep_lookahead::Bool=false, use_random_policy::Bool=false)
     # Confirm that network is on the CPU for inference
     f = cpu(f)
-
+    up = solver.updater
     isnothing(solver.bmdp) && fill_bmdp!(pomdp, solver)
 
     if use_random_policy
-        # @info "Using random policy for data generation..."
-        # planner = RandomPolicy(Random.GLOBAL_RNG, pomdp, PreviousObservationUpdater())
-        @info "Using provided heuristic policy for data generation..."
-        planner = solver.data_gen_policy
+        @info "Using random policy for data generation..."
+        planner = RandomPolicy(Random.GLOBAL_RNG, pomdp, up)
+        # @info "Using provided heuristic policy for data generation..."
+        # planner = solver.data_gen_policy
     elseif use_onestep_lookahead
         # Use greedy one-step lookahead with neural network `f`
         solver.onestep_solver.estimate_value = b->value_lookup(b, f)
@@ -419,7 +451,6 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
         planner = solve(solver.mcts_solver, solver.bmdp)
     end
 
-    up = solver.updater
     ds0 = POMDPs.initialstate_distribution(pomdp)
     collect_metrics = solver.collect_metrics
     accuracy_func = solver.accuracy_func

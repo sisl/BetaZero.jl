@@ -9,7 +9,9 @@ using Distributed
     using POMDPs
     using POMDPTools
     using Plots; default(fontfamily="Computer Modern", framestyle=:box)
+    using Random
     using Statistics
+    using StatsBase
     using BetaZero
     using Flux
 end
@@ -66,8 +68,12 @@ end
 
     function BetaZero.input_representation(b::ParticleCollection)
         Y = [s.y for s in particles(b)]
-        μ, σ = mean(Y), std(Y)
-        return Float32[μ, σ]
+        zeroifnan(x) = isnan(x) ? 0 : x
+        μ = mean(Y)
+        σ = std(Y)
+        s = zeroifnan(skewness(Y))
+        k = zeroifnan(kurtosis(Y))
+        return Float32[μ, σ, s, k]
     end
 
 
@@ -75,16 +81,23 @@ end
     function BetaZero.initialize_network(nn_params::BetaZeroNetworkParameters) # MLP
         @info "Using simplified MLP for neural network..."
         input_size = nn_params.input_size
-        num_dense1 = 16
-        num_dense2 = 8
+        # layer_dims = 1024*ones(Int, 5)
+        layer_dims = [120, 120, 84]
         out_dim = 1
 
-        return Chain(
-            Dense(prod(input_size), num_dense1, relu),
-            Dense(num_dense1, num_dense2, relu),
-            Dense(num_dense2, out_dim),
-            # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
-        )
+        layers = Dense[Dense(prod(input_size), layer_dims[1], relu)]
+        for i in 1:length(layer_dims)-1
+            push!(layers, Dense(layer_dims[i], layer_dims[i+1], relu))
+        end
+        push!(layers, Dense(layer_dims[end], out_dim))
+
+        return Chain(layers...)
+        # return Chain(
+        #     Dense(prod(input_size), num_dense1, relu),
+        #     Dense(num_dense1, num_dense2, relu),
+        #     Dense(num_dense2, out_dim),
+        #     # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
+        # )
     end
 
     lightdark_accuracy_func(pomdp, b0, s0, final_action, returns) = returns[end] == pomdp.correct_r
@@ -93,48 +106,73 @@ end
 
 pomdp = LightDark1D()
 pomdp.movement_cost = 0.0
-up = BootstrapFilter(pomdp, 1000)
+up = BootstrapFilter(pomdp, 500)
 
-if !Sys.islinux()
-    # policy = RandomPolicy(pomdp)
-    policy = HeuristicLightDarkPolicy(; pomdp)
+if !Sys.islinux() && false
+    seed = rand(1:100_000)
+    @show seed
+    Random.seed!(seed) # Determinism (9, 11870, 24269)
+
+    policy = RandomPolicy(pomdp)
+    # policy = HeuristicLightDarkPolicy(; pomdp)
 
     S = []
     A = []
     O = []
     B = []
     R = []
-    for (s,a,o,b,r,sp,bp) in stepthrough(pomdp, policy, up, "s,a,o,b,r,sp,bp", max_steps=500)
+    max_steps = 20
+    for (s,a,o,b,r,sp,bp) in stepthrough(pomdp, policy, up, "s,a,o,b,r,sp,bp"; max_steps)
         ỹ = mean(s.y for s in particles(b))
         push!(S, s)
         push!(A, a)
         push!(O, o)
         push!(B, b)
         push!(R, r)
-        # @info s.y, a, r, ỹ
+        @info s.y, a, r, ỹ
     end
+
+    G = BetaZero.compute_returns(R; γ=POMDPs.discount(pomdp))
+    display(G)
 
     # using ColorSchemes
     Y = map(s->s.y, S)
+    Ỹ = map(b->mean(p.y for p in particles(b)), B)
     ymax = max(10, max(maximum(Y), abs(minimum(Y))))*1.5
-    xmax = max(length(S), 50)
-    plot(xlims=(1, xmax), ylims=(-ymax, ymax), size=(900,200), margin=5Plots.mm, legend=:outertopleft, xlabel="time", ylabel="state")
+    xmax = max(length(S), max_steps)
+    plt_lightdark = plot(xlims=(1, xmax), ylims=(-ymax, ymax), size=(900,200), margin=5Plots.mm, legend=:outertopleft, xlabel="time", ylabel="state")
     heatmap!(1:xmax, range(-ymax, ymax, length=100), (x,y)->sqrt(std(observation(pomdp, LightDark1DState(0, y)))), c=:grayC)
     hline!([0], c=:green, style=:dash, label="goal")
     # plot!(eachindex(S), O, mark=true, ms=2, c=:gray, mc=:black, msc=:white, label="observation")
-    plot!(eachindex(S), Y, c=:red, lw=2, label="trajectory")
-    scatter!(eachindex(S), O, ms=2, c=:black, msc=:white, label="observation")
-    display(plot!())
+    plot_beliefs(B; hold=true)
+    plot!(eachindex(S), Y, c=:red, lw=2, label="trajectory", alpha=0.5)
+    plot!(eachindex(S), Ỹ, c=:blue, lw=1, ls=:dash, label="believed traj.", alpha=0.5)
+    scatter!(eachindex(S), O, ms=2, c=:cyan, msc=:black, label="observation")
+    display(plt_lightdark)
 end
+
+
+function plot_beliefs(B; hold=false)
+    !hold && plot()
+    for i in eachindex(B)
+        n = length(particles(B[i]))
+        P = particles(B[i])
+        X = i*ones(n)
+        Y = [p.y for p in P]
+        scatter!(X, Y, c=:black, msc=:white, alpha=0.25, ms=2, label=i==1 ? "belief" : false)
+    end
+    return plot!()
+end
+
 
 solver = BetaZeroSolver(updater=up,
                         belief_reward=lightdark_belief_reward,
-                        n_iterations=25,
-                        n_data_gen=50_000,
-                        n_holdout=1000,
-                        use_random_policy_data_gen=false, # NOTE: Hack to use `data_gen_policy`
+                        n_iterations=1,
+                        n_data_gen=1000,
+                        n_holdout=0,
+                        use_random_policy_data_gen=true, # NOTE: Hack to use `data_gen_policy`
                         use_onestep_lookahead_holdout=false,
-                        # data_gen_policy=HeuristicLightDarkPolicy(; pomdp),
+                        data_gen_policy=HeuristicLightDarkPolicy(; pomdp),
                         collect_metrics=true,
                         verbose=true,
                         include_info=false,
@@ -146,22 +184,75 @@ solver.mcts_solver.exploration_constant = 100.0 # TODO: 100.0 ???
 solver.onestep_solver.n_actions = 20
 solver.onestep_solver.n_obs = 2
 
+solver.network_params.training_epochs = 1000
 solver.network_params.n_samples = 1000
-solver.network_params.input_size = (2,)
-solver.network_params.verbose_plot_frequency = Inf
+solver.network_params.input_size = (4,)
+solver.network_params.verbose_plot_frequency = 20
 solver.network_params.verbose_update_frequency = 20
-solver.network_params.learning_rate = 0.0001
+solver.network_params.learning_rate = 0.005
 solver.network_params.batchsize = 512
-solver.network_params.λ_regularization = 0.0
+solver.network_params.λ_regularization = 0.00001
 solver.network_params.normalize_target = true
 # solver.network_params.loss_func = Flux.Losses.mse # Mean-squared error
 
 policy = solve(solver, pomdp)
+
+
+"""
+Sweep neural network hyperparameters to tune.
+"""
+function tune_network_parameters(pomdp::POMDP, solver::BetaZeroSolver;
+                                 learning_rates=[0.1, 0.01, 0.005, 0.001, 0.0001],
+                                 λs=[0, 0.1, 0.005, 0.001, 0.0001],
+                                 loss_funcs=[Flux.Losses.mae, Flux.Losses.mse],
+                                 normalize_targets=[true, false])
+    solver.use_random_policy_data_gen = true
+    @info "Tuning using a random policy for data generation."
+    results = Dict()
+    N = sum(map(length, [learning_rates, λs, loss_funcs]))
+    i = 1
+    for lr in learning_rates
+        for λ in λs
+            for loss in loss_funcs
+                for normalize_target in normalize_targets
+                    @info "Tuning iteration: $i/$N ($(round(i/N*100, digits=3)))"
+                    i += 1
+
+                    solver.network_params.learning_rate = lr
+                    solver.network_params.λ_regularization = λ
+                    solver.network_params.loss_func = loss
+                    solver.network_params.normalize_target = normalize_target
+                    loss_str = string(loss)
+
+                    @info "Tuning with: lr=$lr, λ=$λ, loss=$loss_str, normalize_target=$normalize_target"
+                    empty!(solver.data_buffer)
+                    f_prev = BetaZero.initialize_network(solver)
+                    BetaZero.generate_data!(pomdp, solver, f_prev; use_random_policy=solver.use_random_policy_data_gen, inner_iter=solver.n_data_gen, outer_iter=1)
+                    f_curr = BetaZero.train_network(deepcopy(f_prev), solver; verbose=solver.verbose, results=results)
+
+                    key = (lr, λ, loss_str, normalize_target)
+                    results[key]["network"] = f_curr
+                end
+            end
+        end
+    end
+    return results
+end
+
+# results = tune_network_parameters(pomdp, solver; loss_funcs=[Flux.Losses.mae], normalize_targets=[true], learning_rates=[0.005], λs=[0.0001])
+
+# TRY: lr=0.005, λ=0.1, loss=mse
+# TRY: lr=0.0001, λ=0.001, loss=mae
+# TRY: lr=0.0001, λ=0.0001, loss=mse
+
+
+
 # # other_solver = OneStepLookaheadSolver(n_actions=100,
 #                                 # n_obs=10)
 # other_solver = solver.mcts_solver
 # bmdp = BeliefMDP(pomdp, up, lightdark_belief_reward)
 # policy = solve(other_solver, bmdp)
+
 
 # # policy = HeuristicLightDarkPolicy(; pomdp)
 # b0 = initialize_belief(up, [rand(initialstate(pomdp)) for _ in 1:up.n_init])
