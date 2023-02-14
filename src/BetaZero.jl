@@ -521,8 +521,8 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         if include_info
             push!(infos, info)
             push!(beliefs, bp)
-            push!(actions, a)
         end
+        push!(actions, a)
     end
 
     γ = POMDPs.discount(pomdp)
