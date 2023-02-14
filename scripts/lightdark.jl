@@ -66,14 +66,18 @@ end
     # 1) BetaZero.input_representation(b) -> Vector or Matrix
     #============= || =============#
 
-    function BetaZero.input_representation(b::ParticleCollection)
+    function BetaZero.input_representation(b::ParticleCollection; use_higher_orders::Bool=false)
         Y = [s.y for s in particles(b)]
-        zeroifnan(x) = isnan(x) ? 0 : x
         μ = mean(Y)
         σ = std(Y)
-        s = zeroifnan(skewness(Y))
-        k = zeroifnan(kurtosis(Y))
-        return Float32[μ, σ, s, k]
+        if use_higher_orders
+            zeroifnan(x) = isnan(x) ? 0 : x
+            s = zeroifnan(skewness(Y))
+            k = zeroifnan(kurtosis(Y))
+            return Float32[μ, σ, s, k]
+        else
+            return Float32[μ, σ]
+        end
     end
 
 
@@ -165,7 +169,8 @@ function plot_beliefs(B; hold=false)
 end
 
 
-solver = BetaZeroSolver(updater=up,
+solver = BetaZeroSolver(pomdp=pomdp,
+                        updater=up,
                         belief_reward=lightdark_belief_reward,
                         n_iterations=1,
                         n_data_gen=1000,
@@ -179,14 +184,15 @@ solver = BetaZeroSolver(updater=up,
                         accuracy_func=lightdark_accuracy_func)
 
 solver.mcts_solver.n_iterations = 100 # TODO: More!!!!
-solver.mcts_solver.exploration_constant = 100.0 # TODO: 100.0 ???
+solver.mcts_solver.exploration_constant = 1.0
+solver.mcts_solver.k_state = 2.0
 
 solver.onestep_solver.n_actions = 20
 solver.onestep_solver.n_obs = 2
 
 solver.network_params.training_epochs = 1000
 solver.network_params.n_samples = 1000
-solver.network_params.input_size = (4,)
+solver.network_params.input_size = (2,)
 solver.network_params.verbose_plot_frequency = 20
 solver.network_params.verbose_update_frequency = 20
 solver.network_params.learning_rate = 0.005
