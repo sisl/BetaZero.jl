@@ -66,7 +66,7 @@ end
     # 1) BetaZero.input_representation(b) -> Vector or Matrix
     #============= || =============#
 
-    function BetaZero.input_representation(b::ParticleCollection; use_higher_orders::Bool=false)
+    function BetaZero.input_representation(b::ParticleCollection; use_higher_orders::Bool=true)
         Y = [s.y for s in particles(b)]
         μ = mean(Y)
         σ = std(Y)
@@ -192,7 +192,6 @@ solver.onestep_solver.n_obs = 2
 
 solver.network_params.training_epochs = 1000
 solver.network_params.n_samples = 1000
-solver.network_params.input_size = (2,)
 solver.network_params.verbose_plot_frequency = 20
 solver.network_params.verbose_update_frequency = 20
 solver.network_params.learning_rate = 0.005
