@@ -76,6 +76,7 @@ end
     onestep_solver::OneStepLookaheadSolver = OneStepLookaheadSolver(n_actions=5,
                                                                     n_obs=2,
                                                                     estimate_value=b->0.0)
+    data_gen_policy = nothing
     use_onestep_lookahead_holdout::Bool = true # Use greedy one-step lookahead solver when checking performance on the holdout set
     use_random_policy_data_gen::Bool = true # Use random policy for data generation
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
@@ -209,10 +210,11 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
     perm_train = perm[1:n_train]
     perm_valid = perm[n_train+1:n_data]
 
-    x_train = x_data[:,:,:,perm_train]
-    y_train = y_data[:, perm_train]
+    x_size_span = map(d->1:d, nn_params.input_size) # e.g., (1:30, 1:30, 1:5)
+    x_train = getindex(x_data, x_size_span..., perm_train) # general for any size matrix e.g., x_train = x_data[:,:,:,perm_train]
+    y_train = y_data[:, perm_train] # always assumed to be 1xN (TODO: Changes when dealing with policy vector)
 
-    x_valid = x_data[:,:,:,perm_valid]
+    x_valid = getindex(x_data, x_size_span..., perm_valid) # general for any size matrix e.g., x_valid = x_data[:,:,:,perm_valid]
     y_valid = y_data[:, perm_valid]
 
     # Put model/data onto GPU device
@@ -233,7 +235,7 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
 
     # Remove un-normalization layer (if added from previous iteration)
     # We want to train for values close to [-1, 1]
-    if isa(f.layers[end], Function)
+    if isa(f.layers[end], Function) && nn_params.normalize_target
         f = Chain(f.layers[1:end-1]...)
     end
 
@@ -273,7 +275,8 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
             println("Epoch: ", e, " Loss Train: ", loss_train, " Loss Val: ", loss_valid, " | Acc. Train: ", acc_train, " Acc. Val: ", acc_valid)
         end
         if e % nn_params.verbose_plot_frequency == 0
-            plot(xlims=(1, training_epochs), ylims=(0, nn_params.normalize_target ? 1 : 2000)) # TODO: Generalize
+            # TODO: Generalize
+            plot(xlims=(1, training_epochs), ylims=(0, 1))
             plot!(1:e, losses_train, label="training")
             plot!(1:e, losses_valid, label="validation")
             display(plot!())
@@ -284,8 +287,12 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
         learning_curve = plot!()
         display(learning_curve)
 
-        value_model = (cpu(f(x_valid))' .* std_y) .+ mean_y
-        value_data = (cpu(y_valid)' .* std_y) .+ mean_y
+        value_model = cpu(f(x_valid))'
+        value_data = cpu(y_valid)'
+        if nn_params.normalize_target
+            value_model = (value_model .* std_y) .+ mean_y
+            value_data = (value_data .* std_y) .+ mean_y
+        end
         value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=3)
         Plots.histogram!(value_data, alpha=0.5, label="data", c=4)
         display(value_distribution)
@@ -301,9 +308,11 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false)
         Flux.CUDA.reclaim()
     end
 
-    # Add un-normalization layer
-    unnormalize = y -> (y .* std_y) .+ mean_y
-    f = Chain(f.layers..., unnormalize)
+    if nn_params.normalize_target
+        # Add un-normalization layer
+        unnormalize = y -> (y .* std_y) .+ mean_y
+        f = Chain(f.layers..., unnormalize)
+    end
 
     return f
 end
@@ -396,7 +405,10 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
     isnothing(solver.bmdp) && fill_bmdp!(pomdp, solver)
 
     if use_random_policy
-        planner = RandomPolicy(Random.GLOBAL_RNG, pomdp, PreviousObservationUpdater())
+        # @info "Using random policy for data generation..."
+        # planner = RandomPolicy(Random.GLOBAL_RNG, pomdp, PreviousObservationUpdater())
+        @info "Using provided heuristic policy for data generation..."
+        planner = solver.data_gen_policy
     elseif use_onestep_lookahead
         # Use greedy one-step lookahead with neural network `f`
         solver.onestep_solver.estimate_value = b->value_lookup(b, f)
@@ -495,6 +507,11 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     local action
     local T
     infos::Vector = []
+    beliefs::Vector = []
+    actions::Vector = []
+
+    include_info && push!(beliefs, b0)
+
     for (a,r,bp,t,info) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t,action_info", max_steps=max_steps)
         # @info "Simulation time step $t"
         T = t
@@ -503,6 +520,8 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         push!(data, BetaZeroTrainingData(b=input_representation(bp)))
         if include_info
             push!(infos, info)
+            push!(beliefs, bp)
+            push!(actions, a)
         end
     end
 
@@ -513,7 +532,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         d.z = G[t]
     end
 
-    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, action, infos, T) : nothing
+    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, beliefs, actions, infos, T) : nothing
 
     return data, metrics
 end
@@ -523,14 +542,15 @@ end
 Method to collect performance and validation metrics during BetaZero policy iteration.
 Note, user defines `solver.accuracy_func` to determine the accuracy of the final decision (if applicable).
 """
-function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, action, infos, T)
+function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, beliefs, actions, infos, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
     returns = [d.z for d in data]
     discounted_return = returns[1]
-    accuracy = accuracy_func(pomdp, b0, s0, action, returns) # NOTE: Problem specific, provide function to compute this
-    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T, infos=infos, action=action)
+    final_action = actions[end]
+    accuracy = accuracy_func(pomdp, b0, s0, final_action, returns) # NOTE: Problem specific, provide function to compute this
+    return (discounted_return=discounted_return, accuracy=accuracy, num_actions=T, infos=infos, beliefs=beliefs, actions=actions)
 end
 
 
