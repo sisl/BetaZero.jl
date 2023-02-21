@@ -6,7 +6,7 @@ data_kurtosis(D) = [kurtosis(D[x,y,1:end-1]) for x in 1:size(D,1), y in 1:size(D
 
 
 function convert2data(b::MEBelief)
-    P = particles(b)
+    P = MineralExploration.particles(b)
     grid_dims = size(P[1].ore_map)[1:2]
     N = length(P)
     states = Array{Float32}(undef, grid_dims..., N)

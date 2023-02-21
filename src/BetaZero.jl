@@ -19,6 +19,7 @@ using UnicodePlots
 include("belief_mdp.jl")
 include("representation.jl")
 include("onestep_lookahead.jl")
+include("bias.jl")
 
 export
     BetaZeroSolver,
@@ -57,7 +58,8 @@ end
     n_evaluate::Int = 0 # Number of episodes to run for network evaluation and comparison.
     n_holdout::Int = 10 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
     n_buffer::Int = n_iterations # Number of iterations to keep data for network training (NOTE: each simulation has multiple time steps of data, not counted in this number. This number corresponds to the number of iterations, i.e., set to 2 if you want to keep data from the previous 2 policy iterations.)
-    data_buffer::CircularBuffer = CircularBuffer(n_buffer) # Simulation data buffer for training (NOTE: each simulation has multiple time steps of data)
+    data_buffer_train::CircularBuffer = CircularBuffer(n_buffer) # Simulation data buffer for training (NOTE: each simulation has multiple time steps of data)
+    data_buffer_valid::CircularBuffer = CircularBuffer(n_buffer) # Simulation data buffer for validation (NOTE: making sure to clearly separate training from validation to prevent data leakage)
     λ_ucb::Real = 0.0 # Upper confidence bound parameter: μ + λσ # TODO: Remove?
     updater::POMDPs.Updater
     network_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters(input_size=size(BetaZero.input_representation(initialize_belief(updater, initialstate(pomdp))))) # parameters for training CNN
@@ -74,12 +76,12 @@ end
                                                 tree_in_info=false,
                                                 show_progress=false,
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a neural network lookup
-    onestep_solver::OneStepLookaheadSolver = OneStepLookaheadSolver(n_actions=5,
+    onestep_solver::OneStepLookaheadSolver = OneStepLookaheadSolver(n_actions=10,
                                                                     n_obs=2,
                                                                     estimate_value=b->0.0)
-    data_gen_policy = nothing
-    use_onestep_lookahead_holdout::Bool = true # Use greedy one-step lookahead solver when checking performance on the holdout set
-    use_random_policy_data_gen::Bool = true # Use random policy for data generation
+    data_gen_policy = nothing # TODO: Either remove, or replace with "general" policy instead of the `OneStepLookaheadSolver`
+    use_onestep_lookahead_holdout::Bool = false # Use greedy one-step lookahead solver when checking performance on the holdout set
+    use_random_policy_data_gen::Bool = false # Use random policy for data generation
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
     performance_metrics::Array = [] # TODO: store_metrics for NON-HOLDOUT runs.
@@ -125,25 +127,22 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP)
         solver.verbose && println(); println("—"^40); println(); @info "BetaZero iteration $i/$(solver.n_iterations)"
 
         # 0) Evaluate performance on a holdout test set (never used for training or network selection).
-        # run_holdout_test!(pomdp, solver, f_prev; outer_iter=i) # TODO: DEBUGGING
         run_holdout_test!(pomdp, solver, f_prev)
 
         # 1) Generate data using the best BetaZero agent so far: {[belief, return], ...}
-        generate_data!(pomdp, solver, f_prev; use_random_policy=solver.use_random_policy_data_gen, inner_iter=solver.n_data_gen, outer_iter=i)
+        generate_data!(pomdp, solver, f_prev; store_metrics=solver.collect_metrics, use_random_policy=solver.use_random_policy_data_gen, inner_iter=solver.n_data_gen, outer_iter=i)
 
         # 2) Optimize neural network parameters with recent simulated data (to estimate value given belief).
         f_curr = train_network(deepcopy(f_prev), solver; verbose=solver.verbose)
 
         # 3) Evaluate BetaZero agent (compare to previous agent based on mean returns).
-        # f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=i) # TODO: DEBUGGING
         f_prev = evaluate_agent(pomdp, solver, f_prev, f_curr; outer_iter=typemax(Int32)+i)
     end
 
-    if solver.n_iterations == 1
-        # Re-run holdout test if only running for a single iteration
-        run_holdout_test!(pomdp, solver, f_prev)
-    end
+    # Re-run holdout test with final network
+    run_holdout_test!(pomdp, solver, f_prev)
 
+    # Include the network in the MCTS planner as part of the BetaZero policy
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f_prev)
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     policy = BetaZeroPolicy(f_prev, mcts_planner)
@@ -198,31 +197,25 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false, results=n
     normalize_target = nn_params.normalize_target
     key = (lr, λ, loss_str, normalize_target)
 
-    data = sample_data(solver.data_buffer, nn_params.n_samples) # sample `n_samples` from last `n_buffer` simulations.
-    x_data, y_data = data.X, data.Y
+    n_train = Int(nn_params.n_samples ÷ (1/nn_params.training_split))
+    n_valid = nn_params.n_samples - n_train
+
+    data_train = sample_data(solver.data_buffer_train, n_train) # sample from last `n_buffer` simulations.
+    data_valid = sample_data(solver.data_buffer_valid, n_valid) # sample from last `n_buffer` simulations.
+    x_train, y_train = data_train.X, data_train.Y
+    x_valid, y_valid = data_valid.X, data_valid.Y
 
     # Normalize target values close to the range of [-1, 1]
     if normalize_target
-        mean_y = mean(y_data)
-        std_y = std(y_data)
-        y_data = (y_data .- mean_y) ./ std_y
+        # Normalize only based on the training data (but apply it to training and validation data)
+        mean_y = mean(y_train)
+        std_y = std(y_train)
+        normalize_func(y, μ, σ) = (y .- μ) ./ σ
+        y_train = normalize_func(y_train, mean_y, std_y)
+        y_valid = normalize_func(y_valid, mean_y, std_y)
     end
 
-    n_data = length(y_data)
-    n_train = Int(n_data ÷ (1/nn_params.training_split))
-
-    verbose && @info "Data set size: $n_data"
-
-    perm = randperm(n_data)
-    perm_train = perm[1:n_train]
-    perm_valid = perm[n_train+1:n_data]
-
-    x_size_span = map(d->1:d, nn_params.input_size) # e.g., (1:30, 1:30, 1:5)
-    x_train = getindex(x_data, x_size_span..., perm_train) # general for any size matrix e.g., x_train = x_data[:,:,:,perm_train]
-    y_train = y_data[:, perm_train] # always assumed to be 1xN (TODO: Changes when dealing with policy vector)
-
-    x_valid = getindex(x_data, x_size_span..., perm_valid) # general for any size matrix e.g., x_valid = x_data[:,:,:,perm_valid]
-    y_valid = y_data[:, perm_valid]
+    verbose && @info "Data set size: $(n_train):$(n_valid) (training:validation)"
 
     # Put model/data onto GPU device
     device = nn_params.device
@@ -264,6 +257,8 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false, results=n
     losses_valid = []
     accs_train = []
     accs_valid = []
+    learning_curve = nothing
+
     verbose && @info "Beginning training $(size(x_train))"
     @conditional_time verbose for e in 1:training_epochs
         for (x, y) in train_data
@@ -283,30 +278,38 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false, results=n
         end
         if e % nn_params.verbose_plot_frequency == 0
             # TODO: Generalize
-            plot(xlims=(1, training_epochs), ylims=(0, 1), title="learning curve: $key")
+            learning_curve = plot(xlims=(1, training_epochs), ylims=(0, 1), title="learning curve: $key")
             plot!(1:e, losses_train, label="training")
             plot!(1:e, losses_valid, label="validation")
-            display(plot!())
+            display(learning_curve)
         end
     end
 
-    # Check value distributions of model and data
-    value_model = cpu(f(x_valid))'
-    value_data = cpu(y_valid)'
+    # Place network on the CPU (better GPU memory conservation when doing parallelized inference)
+    f = cpu(f)
+
     if normalize_target
-        value_model = (value_model .* std_y) .+ mean_y
-        value_data = (value_data .* std_y) .+ mean_y
+        # Add un-normalization layer
+        unnormalize = y -> (y .* std_y) .+ mean_y
+        f = Chain(f.layers..., unnormalize)
     end
 
+    value_model = f(cpu(x_valid))'
+    value_data = normalize_target ? unnormalize(cpu(y_valid))' : cpu(y_valid)'
+
     if nn_params.verbose_plot_frequency != Inf
-        learning_curve = nothing
         value_distribution = nothing
         try
-            learning_curve = plot!()
-            display(learning_curve)
             value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=:gray, title="values: $key")
             Plots.histogram!(value_data, alpha=0.5, label="data", c=:navy)
             display(value_distribution)
+            plot_bias(value_model, value_data)
+            display(Plots.title!("validation data"))
+
+            value_model_training = f(cpu(x_train))'
+            value_data_training = normalize_target ? unnormalize(cpu(y_train))' : cpu(y_train)'
+            plot_bias(value_model_training, value_data_training)
+            display(Plots.title!("training data"))
         catch err
             @warn "Error in plotting learning curve and value distribution: $err"
         end
@@ -331,20 +334,11 @@ function train_network(f, solver::BetaZeroSolver; verbose::Bool=false, results=n
         end
     end
 
-    # Place network on the CPU (better GPU memory conservation when doing parallelized inference)
-    f = cpu(f)
-
     # Clean GPU memory explicitly
     if device == gpu
         x_train = y_train = x_valid = y_valid = nothing
         GC.gc()
         Flux.CUDA.reclaim()
-    end
-
-    if normalize_target
-        # Add un-normalization layer
-        unnormalize = y -> (y .* std_y) .+ mean_y
-        f = Chain(f.layers..., unnormalize)
     end
 
     return f
@@ -356,14 +350,12 @@ Evaluate the neural network `f` using the `belief` as input.
 Note, inference is done on the CPU given a single input.
 """
 function value_lookup(belief, f)
-    b = input_representation(belief)
-    b = Float32.(b)
-    x = Flux.unsqueeze(b; dims=ndims(b)+1)
+    b = Float32.(input_representation(belief))
+    x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
     y = f(x) # evaluate network `f`
-    value = cpu(y)[1] # returns 1 element 1D array
-    return value
+    value = cpu(y)
+    return length(value) == 1 ? value[1] : value
 end
-
 
 
 """
@@ -378,7 +370,6 @@ function sample_data(data_buffer::CircularBuffer, n::Int)
     belief_size = size(data_buffer[1].X)[1:end-1]
     X = Array{Float32}(undef, belief_size..., n)
     Y = Array{Float32}(undef, 1, n)
-    G = Vector{Float32}(undef, n)
     for (i,sim_i) in enumerate(sampled_sims_indices)
         sim = data_buffer[sim_i]
         T = length(sim.Y)
@@ -386,9 +377,8 @@ function sample_data(data_buffer::CircularBuffer, n::Int)
         belief_size_span = map(d->1:d, belief_size) # e.g., (1:30, 1:30, 1:5)
         setindex!(X, getindex(sim.X, belief_size_span..., t), belief_size_span..., i) # general for any size matrix e.g., X[:,;,:,i] = sim.X[:,:,:,t]
         Y[i] = sim.Y[t]
-        G[i] = sim.G[sim_i]
     end
-    return (X=X, Y=Y, G=G)
+    return (X=X, Y=Y)
 end
 
 
@@ -431,7 +421,10 @@ end
 """
 Generate training data using online MCTS with the best network so far `f` (parallelized across episodes).
 """
-function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int=0, inner_iter::Int=solver.n_data_gen, store_metrics::Bool=false, store_data::Bool=true, use_onestep_lookahead::Bool=false, use_random_policy::Bool=false)
+function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f;
+                        outer_iter::Int=0, inner_iter::Int=solver.n_data_gen,
+                        store_metrics::Bool=false, store_data::Bool=true,
+                        use_onestep_lookahead::Bool=false, use_random_policy::Bool=false)
     # Confirm that network is on the CPU for inference
     f = cpu(f)
     up = solver.updater
@@ -472,14 +465,19 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
             s0 = rand(ds0)
             b0 = POMDPs.initialize_belief(up, ds0)
             data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info)
-            B = []
-            Z = []
-            # Π = []
-            discounted_return = data[1].z
-            for d in data
-                push!(B, d.b)
-                push!(Z, d.z)
-                # push!(Π, d.π) # TODO.
+            if ismissing(data) && ismissing(metrics)
+                # ignore missing data
+                B = Z = metrics = discounted_return = missing
+            else
+                B = []
+                Z = []
+                # Π = []
+                discounted_return = data[1].z
+                for d in data
+                    push!(B, d.b)
+                    push!(Z, d.z)
+                    # push!(Π, d.π) # TODO.
+                end
             end
             put!(channel, true) # trigger progress bar update
             B, Z, metrics, discounted_return
@@ -487,13 +485,28 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
 
     put!(channel, false) # tell printing task to finish
 
-    beliefs = vcat([d[1] for d in parallel_data]...) # combine all beliefs
-    returns = vcat([d[2] for d in parallel_data]...) # combine all returns
-    metrics = vcat([d[3] for d in parallel_data]...) # combine all metrics
-    G = vcat([d[4] for d in parallel_data]...) # combine all final returns
+    beliefs = vcat([d[1] for d in parallel_data if !ismissing(d[1])]...) # combine all beliefs
+    returns = vcat([d[2] for d in parallel_data if !ismissing(d[2])]...) # combine all returns
+    metrics = vcat([d[3] for d in parallel_data if !ismissing(d[3])]...) # combine all metrics
+    G = vcat([d[4] for d in parallel_data if !ismissing(d[4])]...) # combine all final returns
+
+    solver.verbose && @info "Percent non-missing: $(length(G)/inner_iter*100)%"
 
     if store_metrics
         push!(solver.performance_metrics, metrics...)
+    end
+
+    if solver.verbose
+        μ, σ = mean_and_std(returns)
+        n_returns = length(returns)
+        @info "Generated data return statistics: $(round(μ, digits=3)) ± $(round(σ/sqrt(n_returns), digits=3))"
+    end
+
+    if isempty(beliefs)
+        @warn "Empty generated data, rerunning..."
+        # TODO: Retry number...
+        f = train_network(deepcopy(f), solver; verbose=solver.verbose)
+        return generate_data!(pomdp, solver, f; outer_iter, inner_iter, store_metrics, store_data, use_onestep_lookahead, use_random_policy)
     end
 
     # Much faster than `cat(belief...; dims=4)`
@@ -508,8 +521,22 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::Int
     data = (X=X, Y=Y, G=G)
 
     if store_data
-        # Store data in buffer for training
-        push!(solver.data_buffer, data)
+        # Store data in buffer for training and validation
+        # (separate the sets here so there is no chance of data leakage)
+        n_data = length(data.Y)
+        n_train = Int(n_data ÷ (1/solver.network_params.training_split))
+        perm = randperm(n_data) # shuffle data
+        perm_train = perm[1:n_train]
+        perm_valid = perm[n_train+1:n_data]
+        x_size_span = map(d->1:d, solver.network_params.input_size) # e.g., (1:30, 1:30, 1:5)
+        X_train = getindex(data.X, x_size_span..., perm_train) # general for any size matrix e.g., x_train = x_data[:,:,:,perm_train]
+        Y_train = data.Y[:, perm_train] # always assumed to be 1xN (TODO: Changes when dealing with policy vector)
+        data_train = (X=X_train, Y=Y_train)
+        push!(solver.data_buffer_train, data_train)
+        X_valid = getindex(data.X, x_size_span..., perm_valid)
+        Y_valid = data.Y[:, perm_valid] # TODO: Changes when dealing with policy vector
+        data_valid = (X=X_valid, Y=Y_valid)
+        push!(solver.data_buffer_valid, data_valid)
     end
 
     return data
@@ -533,7 +560,7 @@ end
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
 function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0;
-                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, include_info::Bool=false)
+                        max_steps=200, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, include_info::Bool=false)
     rewards::Vector{Float64} = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     local action
@@ -560,13 +587,18 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     γ = POMDPs.discount(pomdp)
     G = compute_returns(rewards; γ=γ)
 
-    for (t,d) in enumerate(data)
-        d.z = G[t]
+    skip_missing_reward_signal = true
+
+    if skip_missing_reward_signal && iszero(G) && max_reached
+        # ignore cases were the time limit has been reached and no reward signal is present
+        return missing, missing
+    else
+        for (t,d) in enumerate(data)
+            d.z = G[t]
+        end
+        metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, beliefs, actions, infos, T) : nothing
+        return data, metrics
     end
-
-    metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, beliefs, actions, infos, T) : nothing
-
-    return data, metrics
 end
 
 
@@ -594,13 +626,62 @@ function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f; outer_iter::
         solver.verbose && @info "Running holdout test..."
         returns = generate_data!(pomdp, solver, f;
                                  inner_iter=solver.n_holdout, outer_iter=outer_iter,
-                                 store_metrics=true, store_data=false,
+                                 store_metrics=false, store_data=false,
                                  use_onestep_lookahead=solver.use_onestep_lookahead_holdout)[:G]
-        solver.verbose && display(UnicodePlots.histogram(returns))
+        try
+            solver.verbose && display(UnicodePlots.histogram(returns))
+        catch err
+            @warn "Couldn't fit holdout histogram: $err"
+        end
         μ, σ = mean_and_std(returns)
         push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns))
         solver.verbose && @show μ, σ
     end
+end
+
+
+"""
+Sweep neural network hyperparameters to tune.
+"""
+function tune_network_parameters(pomdp::POMDP, solver::BetaZeroSolver;
+                                 learning_rates=[0.1, 0.01, 0.005, 0.001, 0.0001],
+                                 λs=[0, 0.1, 0.005, 0.001, 0.0001],
+                                 loss_funcs=[Flux.Losses.mae, Flux.Losses.mse],
+                                 normalize_targets=[true, false])
+    _use_random_policy_data_gen = solver.use_random_policy_data_gen # save original setting
+    solver.use_random_policy_data_gen = true
+    @info "Tuning using a random policy for data generation."
+    results = Dict()
+    N = sum(map(length, [learning_rates, λs, loss_funcs, normalize_targets]))
+    i = 1
+    for normalize_target in normalize_targets
+        for loss in loss_funcs
+            for λ in λs
+                for lr in learning_rates
+                    @info "Tuning iteration: $i/$N ($(round(i/N*100, digits=3)))"
+                    i += 1
+
+                    solver.network_params.learning_rate = lr
+                    solver.network_params.λ_regularization = λ
+                    solver.network_params.loss_func = loss
+                    solver.network_params.normalize_target = normalize_target
+                    loss_str = string(loss)
+
+                    @info "Tuning with: lr=$lr, λ=$λ, loss=$loss_str, normalize_target=$normalize_target"
+                    empty!(solver.data_buffer_train)
+                    empty!(solver.data_buffer_valid)
+                    f_prev = initialize_network(solver)
+                    generate_data!(pomdp, solver, f_prev; use_random_policy=solver.use_random_policy_data_gen, inner_iter=solver.n_data_gen, outer_iter=1)
+                    f_curr = train_network(deepcopy(f_prev), solver; verbose=solver.verbose, results=results)
+
+                    key = (lr, λ, loss_str, normalize_target)
+                    results[key]["network"] = f_curr
+                end
+            end
+        end
+    end
+    solver.use_random_policy_data_gen = _use_random_policy_data_gen # reset to original setting
+    return results
 end
 
 

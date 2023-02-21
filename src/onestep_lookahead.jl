@@ -1,6 +1,7 @@
 using Parameters
 using POMDPs
 using POMDPTools
+using ProgressMeter
 using Random
 using StatsBase
 
@@ -23,6 +24,7 @@ end
 Greedy one-step lookahead solver. Used as baseline/verifier.
 """
 POMDPs.solve(solver::OneStepLookaheadSolver, mdp::MDP) = OneStepLookaheadPlanner(solver, mdp, Random.GLOBAL_RNG)
+# POMDPs.solve(solver::OneStepLookaheadSolver, pomdp::POMDP) = OneStepLookaheadPlanner(solver, mdp, Random.GLOBAL_RNG)
 
 
 """
@@ -35,8 +37,7 @@ function POMDPs.action(planner::OneStepLookaheadPlanner, s; include_info::Bool=f
     rng = planner.rng
     tried_idxs = []
     tree = Dict()
-    A = actions(mdp, s)
-    function get_action()
+    function get_action(A)
         if isnothing(solver.next_action)
             return rand(A)
         else
@@ -47,8 +48,9 @@ function POMDPs.action(planner::OneStepLookaheadPlanner, s; include_info::Bool=f
     end
 
     # for a in branched_actions
+    A = actions(mdp, s)
     for i in 1:solver.n_actions
-        a = get_action()
+        a = get_action(A)
         if !haskey(tree, a)
             tree[a] = (sp=[], q=[]) # initialize observation set
         end
