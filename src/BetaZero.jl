@@ -570,6 +570,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     actions::Vector = []
 
     include_info && push!(beliefs, b0)
+    max_reached = false
 
     for (a,r,bp,t,info) in stepthrough(pomdp, policy, up, b0, s0, "a,r,bp,t,action_info", max_steps=max_steps)
         # @info "Simulation time step $t"
@@ -582,6 +583,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             push!(beliefs, bp)
         end
         push!(actions, a)
+        max_reached = (T == max_steps)
     end
 
     γ = POMDPs.discount(pomdp)
