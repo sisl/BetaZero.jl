@@ -113,16 +113,18 @@ begin
 end
 
 # ╔═╡ c0f29e13-bdce-4908-9e9a-6001c88e5ed9
-policy = BetaZero.load_policy("policy_lightdark_pluto5.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto5.bson");
+policy = BetaZero.load_policy("policy_lightdark_pluto_nn.bson");
 
 # ╔═╡ 1bb8df23-575a-479b-a4ce-3ceb3eb7acbf
-solver = BetaZero.load_solver("solver_lightdark_pluto5.bson");
+# solver = BetaZero.load_solver("solver_lightdark_pluto_nn.bson");
+solver = BetaZero.load_solver("solver_lightdark_pluto_gp_1iter.bson");
 
 # ╔═╡ 6309e3f0-29c9-4963-a2d1-f6fcb5f3ada4
-policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp.bson");
+policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_1iter.bson");
 
 # ╔═╡ 80c2be9e-a242-4e9d-a082-8c61cfe5ae74
-policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions.bson");
+policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions_20iters.bson");
 
 # ╔═╡ fb09d547-377a-4e34-9e5f-87d06a8c12e2
 @bind stdev Slider(0:0.1:10, default=0, show_value=true)
@@ -168,12 +170,12 @@ fixed_skew, fixed_kurt = 0, 0
 begin
 	Σ = 0:0.1:5
 	M = -10:0.1:10
-	Y = [policy.network(Float32.([μ σ fixed_skew fixed_kurt fixed_obs])')[1]
+	Y = [policy.surrogate(Float32.([μ σ fixed_skew fixed_kurt fixed_obs])')[1]
 			for μ in M, σ in Σ]
 end;
 
 # ╔═╡ 769e3159-bf5e-4294-b7b9-9e49a32406a1
-Y_gp = [policy_gp.network(Float64.([μ σ fixed_skew fixed_kurt fixed_obs])')[1]
+Y_gp = [policy_gp.surrogate(Float64.([μ σ fixed_skew fixed_kurt fixed_obs])')[1]
 			for μ in M, σ in Σ];
 
 # ╔═╡ 3bbc44ce-b0b2-4c81-8ec9-d4819bd8ba49
@@ -186,7 +188,7 @@ heatmap(Σ, M, Y_gp, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value
 @bind fixed_action Slider([-1, 0, 1], default=0, show_value=true)
 
 # ╔═╡ 42b011d7-268b-4c9f-94d9-bbc4981847c1
-Y_gp_a = [policy_gp_a.network(Float64.([μ σ fixed_skew fixed_kurt fixed_action fixed_obs])')[1] for μ in M, σ in Σ];
+Y_gp_a = [policy_gp_a.surrogate(Float64.([μ σ fixed_skew fixed_kurt fixed_action fixed_obs])')[1] for μ in M, σ in Σ];
 
 # ╔═╡ 607ed6b8-af59-402a-b9ba-6786bb3f248c
 heatmap(Σ, M, Y_gp_a, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap(Y_gp_a))
@@ -201,7 +203,7 @@ pomdp = solver.pomdp;
 begin
 	solver.belief_reward = (pomdp, b, a, bp) -> mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))
 	BetaZero.fill_bmdp!(pomdp, solver)
-	policy_gp2 = BetaZero.solve_planner!(solver, policy_gp.network)
+	policy_gp2 = BetaZero.solve_planner!(solver, policy_gp_a.surrogate)
 end;
 
 # ╔═╡ d1296cde-fe14-4ca0-84bf-540c7752125e
@@ -229,25 +231,22 @@ ParticleFilters.support(b::ParticleHistoryBelief) = particles(b)
 action(policy_gp2, b0)
 
 # ╔═╡ 5853347f-86e7-459d-83cd-ba23239ffb98
-policy2 = BetaZeroPolicy(policy.network, solve(solver.mcts_solver, solver.bmdp));
+policy2 = BetaZeroPolicy(policy.surrogate, solve(solver.mcts_solver, solver.bmdp));
 
 # ╔═╡ 4b0b6f23-1fca-4907-bdb3-eafb3bbc9606
 begin
-	n = 10
+	n = 20
 	expectation = []
 	predicted = []
 	for i in 1:n
 		b0 = initialize_belief(up, ds0)
 		s0 = rand(b0)
-		𝔼G = [simulate(RolloutSimulator(max_steps=100), pomdp, policy_gp2, up, b0, s0) for _ in 1:50]
-		Ṽ = policy_gp.network(BetaZero.input_representation(b0))[1]
+		𝔼G = [simulate(RolloutSimulator(max_steps=100), pomdp, policy_gp2, up, b0, s0) for _ in 1:10]
+		Ṽ = policy_gp2.surrogate(BetaZero.input_representation(b0))[1]
 		push!(expectation, mean(𝔼G))
 		push!(predicted, Ṽ)
 	end
 end
-
-# ╔═╡ 8f0081a3-69c7-4a99-a8b9-11c56bb842d5
-support(b0)
 
 # ╔═╡ 6f2b96cc-c0cf-42fa-8cec-380ff48d9106
 𝔼G = [simulate(RolloutSimulator(max_steps=200), pomdp, π, up, b0, rand(b0)) for _ in 1:100]
@@ -2057,7 +2056,6 @@ version = "1.4.1+0"
 # ╠═652b3290-815a-4e33-80c3-3d7ef84bd8af
 # ╠═5853347f-86e7-459d-83cd-ba23239ffb98
 # ╠═4b0b6f23-1fca-4907-bdb3-eafb3bbc9606
-# ╠═8f0081a3-69c7-4a99-a8b9-11c56bb842d5
 # ╠═6f2b96cc-c0cf-42fa-8cec-380ff48d9106
 # ╠═343bdb4e-f9ba-4c10-a711-750d695652f7
 # ╠═6213273f-0417-4cbc-9eff-9add06948401

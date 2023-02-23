@@ -71,7 +71,7 @@ if false # !Sys.islinux() && false
     end
 
     G = BetaZero.compute_returns(R; γ=POMDPs.discount(pomdp))
-    # display([G [Float64(BetaZero.value_lookup(b, policy.network)) for b in B]])
+    # display([G [Float64(BetaZero.value_lookup(b, policy.surrogate)) for b in B]])
 
     function plot_beliefs(B; hold=false)
         !hold && plot()
@@ -103,7 +103,7 @@ else
     solver = BetaZeroSolver(pomdp=pomdp,
                             updater=up,
                             belief_reward=lightdark_belief_reward,
-                            n_iterations=3,
+                            n_iterations=5,
                             n_data_gen=1000,
                             n_evaluate=0,
                             n_holdout=0,
@@ -112,7 +112,7 @@ else
                             include_info=false,
                             accuracy_func=lightdark_accuracy_func)
 
-    solver.n_buffer = 2 # solver.n_iterations
+    solver.n_buffer = solver.n_iterations
 
     solver.mcts_solver.n_iterations = 100
     solver.mcts_solver.exploration_constant = 1.0 # NOTE: 2.0
@@ -122,24 +122,24 @@ else
     solver.onestep_solver.n_obs = 2
 
     # Gaussian proccess
-    solver.use_nn = false
+    solver.use_nn = true
     solver.gp_params.n_samples = 500
-    solver.gp_params.λ_lcb = 0.5
+    solver.gp_params.λ_lcb = 0.0
     solver.gp_params.verbose_plot = true
 
     # Neural network
-    solver.nn_params.training_epochs = 1000
+    solver.nn_params.training_epochs = 5000
     solver.nn_params.n_samples = solver.gp_params.n_samples # Same as Gaussian proccess
     solver.nn_params.verbose_plot_frequency = 100
     solver.nn_params.verbose_update_frequency = 100
     solver.nn_params.learning_rate = 0.001 # NOTE: 0.005 (better validation: 0.001)
-    solver.nn_params.batchsize = 512
+    solver.nn_params.batchsize = 256
     solver.nn_params.λ_regularization = 1e-5 # 1e-8 # NOTE: 0.00001 (better validation: 0.0001, even better validation: 0.001)
     solver.nn_params.normalize_target = true
     # solver.nn_params.loss_func = Flux.Losses.mse # NOTE: mean-squared error
 
     policy = solve(solver, pomdp)
-    BetaZero.save_policy(policy, "policy_lightdark_pluto_gp_actions.bson")
+    BetaZero.save_policy(policy, "BetaZero/notebooks/policy_lightdark_pluto_nn.bson")
 end
 
 
@@ -213,7 +213,7 @@ if false
     @time _B = cat(_B...; dims=2)
 
     @time returns0_init_network = init_network(_B)
-    @time returns0 = policy.network(_B)
+    @time returns0 = policy.surrogate(_B)
 
     # network = BetaZero.initialize_network(solver)
     # @time returns0 = network(_B)

@@ -1,6 +1,5 @@
 module BetaZero
 
-using BeliefUpdaters
 using BSON
 using DataStructures
 using Distributed

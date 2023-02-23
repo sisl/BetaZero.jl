@@ -72,7 +72,7 @@ osla_n_obs = 1
 policies = Dict(
     "BetaZero"=>bz_policy,
     # "Random"=>RandomPolicy(pomdp),
-    # "One-Step Lookahead"=>solve_osla(bz_policy.network, pomdp, up, lightdark_belief_reward; n_actions=osla_n_actions, n_obs=osla_n_obs),
+    # "One-Step Lookahead"=>solve_osla(bz_policy.surrogate, pomdp, up, lightdark_belief_reward; n_actions=osla_n_actions, n_obs=osla_n_obs),
     # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
     # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
     "POMCPOW"=>solve(convert_to_pomcow(bz_solver), pomdp)
