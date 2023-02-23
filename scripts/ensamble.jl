@@ -15,7 +15,6 @@ end
 
 
 function initialize_ensamble(solver, m=3)
-    # initialize_network(solver) = Chain(Dense(1, 16, relu), Dense(16, 1, tanh))
     networks = [BetaZero.initialize_network(solver) for _ in 1:m]
     return EnsambleNetwork(networks=networks)
 end
@@ -23,7 +22,7 @@ end
 
 function train_ensamble(solver, ensamble::EnsambleNetwork; kwargs...)
     for (i, network) in enumerate(ensamble.networks)
-        ensamble.networks[i] = BetaZero.train_network(network, solver; kwargs...)
+        ensamble.networks[i] = BetaZero.train(network, solver; kwargs...)
     end
     return ensamble
 end

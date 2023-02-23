@@ -13,126 +13,61 @@ using Distributed
     using Statistics
     using StatsBase
     using BetaZero
+    using LightDark
     using Flux
+    include("lightdark_representation.jl")
 end
 
 @everywhere begin
-    # import Base: +
-    # Base.:(+)(s1::LightDark1DState, s2::LightDark1DState) = LightDark1DState(s1.status + s2.status, s1.y + s2.y)
-    # Base.:(/)(s::LightDark1DState, i::Int) = LightDark1DState(s.status, s.y/i)
-
-    POMDPs.actions(::LightDark1D) = [-1, 0, 1] # -10:10 # [-10, -5, -1, 0, 1, 5, 10]
-
-    function POMDPs.transition(p::LightDark1D, s::LightDark1DState, a::Int)
-        if a == 0
-            return Deterministic(LightDark1DState(-1, s.y+a*p.step_size))
-        else
-            max_y = 100
-            return Deterministic(LightDark1DState(s.status, clamp(s.y+a*p.step_size, -max_y, max_y)))
-        end
-    end
-
-    function POMDPs.reward(p::LightDark1D, s::LightDark1DState, a::Int)
-        if s.status < 0
-            return 0.0
-        elseif a == 0
-            if abs(s.y) < 1
-                return p.correct_r
-            else
-                return p.incorrect_r
-            end
-        else
-            return -p.movement_cost
-        end
-    end
-
     @with_kw mutable struct HeuristicLightDarkPolicy <: POMDPs.Policy
         pomdp
         thresh = 0.1
     end
 
-    function POMDPs.action(policy::HeuristicLightDarkPolicy, b::ParticleCollection)
+    function POMDPs.action(policy::HeuristicLightDarkPolicy, b::LightDark.ParticleHistoryBelief)
         ỹ = mean(s.y for s in ParticleFilters.particles(b))
         if abs(ỹ) ≤ policy.thresh
             return 0
         else
-            A = filter(a->a != 0, actions(policy.pomdp))
-            return rand(A)
+            # return ỹ < 0 ? +1 : -1
+            return rand(filter(a->a != 0, actions(policy.pomdp)))
         end
     end
-
-    #========== BetaZero ==========#
-    # Interface:
-    # 1) BetaZero.input_representation(b) -> Vector or Matrix
-    #============= || =============#
-
-    function BetaZero.input_representation(b::ParticleCollection; use_higher_orders::Bool=true)
-        Y = [s.y for s in ParticleFilters.particles(b)]
-        μ = mean(Y)
-        σ = std(Y)
-        if use_higher_orders
-            zeroifnan(x) = isnan(x) ? 0 : x
-            s = zeroifnan(skewness(Y))
-            k = zeroifnan(kurtosis(Y))
-            return Float32[μ, σ, s, k]
-        else
-            return Float32[μ, σ]
-        end
-    end
-
-
-    # Simpler MLP
-    function BetaZero.initialize_network(nn_params::BetaZeroNetworkParameters) # MLP
-        # nσ = 3
-        # @info "Using simplified MLP (ReLUs with $(nσ)tanh) for neural network..."
-        @info "Using simplified MLP (ReLUs) for neural network..."
-        input_size = nn_params.input_size
-        layer_dims = [256, 256, 256, 256]
-        out_dim = 1
-
-        layers = Dense[Dense(prod(input_size), layer_dims[1], relu)]
-        for i in 1:length(layer_dims)-1
-            push!(layers, Dense(layer_dims[i], layer_dims[i+1], relu))
-        end
-        push!(layers, Dense(layer_dims[end], out_dim))
-        # push!(layers, Dense(out_dim, out_dim, y->nσ*tanh(y))) # σ on tanh output.
-
-        # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
-        return Chain(layers...)
-    end
-
-    lightdark_accuracy_func(pomdp, b0, s0, final_action, returns) = returns[end] == pomdp.correct_r
-    lightdark_belief_reward(pomdp, b, a, bp) = mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))
 end
 
-light_loc = 10
-sigma = y->abs(y - light_loc) + 1e-4
-pomdp = LightDark1D(0.9, 100.0, -100.0, 1.0, 0.0, sigma)
-up = BootstrapFilter(pomdp, 500)
+pomdp = LightDark.LightDarkPOMDP()
+up = LightDark.ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, 500))
+
 
 if false # !Sys.islinux() && false
+    policy.planner.solver.n_iterations = 10_000
+
     seed = rand(1:100_000)
     @show seed
-    Random.seed!(seed) # Determinism (9, 11870, 24269)
+    Random.seed!(seed) # Determinism (9, 11870, 24269) 88801
 
-    # rand_policy = RandomPolicy(pomdp)
+    rand_policy = RandomPolicy(pomdp)
     heuristic_policy = HeuristicLightDarkPolicy(; pomdp)
-    policy2use = rand_policy
+    policy2use = policy
 
-    S = []
-    A = []
-    O = []
-    B = []
-    R = []
+    ds0 = initialstate(pomdp)
+    b0 = initialize_belief(up, ds0)
+    s0 = rand(b0)
+    S = [s0]
+    A = [0.0]
+    O = [0.0]
+    B = [b0]
+    R = [0.0]
     max_steps = 20
-    for (s,a,o,b,r,sp,bp) in stepthrough(pomdp, policy2use, up, "s,a,o,b,r,sp,bp"; max_steps)
-        ỹ = mean(s.y for s in ParticleFilters.particles(b))
+    rd = x->round(x, digits=4)
+    for (s,a,o,b,r,sp,bp) in stepthrough(pomdp, policy2use, up, b0, s0, "s,a,o,b,r,sp,bp"; max_steps)
+        ỹ, σ = mean_and_std(s.y for s in ParticleFilters.particles(b))
         push!(S, s)
         push!(A, a)
         push!(O, o)
-        push!(B, b)
         push!(R, r)
-        @info s.y, a, r, ỹ
+        push!(B, bp)
+        @info "s = $(rd(s.y)), a = $(rd(a)), r = $(rd(r)), b = $(rd.([ỹ, σ]))"
     end
 
     G = BetaZero.compute_returns(R; γ=POMDPs.discount(pomdp))
@@ -156,7 +91,7 @@ if false # !Sys.islinux() && false
     ymax = max(20, max(maximum(Y), abs(minimum(Y))))*1.5
     xmax = max(length(S), max_steps)
     plt_lightdark = plot(xlims=(1, xmax), ylims=(-ymax, ymax), size=(900,200), margin=5Plots.mm, legend=:outertopleft, xlabel="time", ylabel="state")
-    heatmap!(1:xmax, range(-ymax, ymax, length=100), (x,y)->sqrt(std(observation(pomdp, LightDark1DState(0, y)))), c=:grayC)
+    heatmap!(1:xmax, range(-ymax, ymax, length=100), (x,y)->sqrt(std(observation(pomdp, LightDarkState(0, y)))), c=:grayC)
     hline!([0], c=:green, style=:dash, label="goal")
     # plot!(eachindex(S), O, mark=true, ms=2, c=:gray, mc=:black, msc=:white, label="observation")
     plot_beliefs(B; hold=true)
@@ -164,47 +99,48 @@ if false # !Sys.islinux() && false
     plot!(eachindex(S), Ỹ, c=:blue, lw=1, ls=:dash, label="believed traj.", alpha=0.5)
     scatter!(eachindex(S), O, ms=2, c=:cyan, msc=:black, label="observation")
     display(plt_lightdark)
+else
+    solver = BetaZeroSolver(pomdp=pomdp,
+                            updater=up,
+                            belief_reward=lightdark_belief_reward,
+                            n_iterations=3,
+                            n_data_gen=1000,
+                            n_evaluate=0,
+                            n_holdout=0,
+                            collect_metrics=true,
+                            verbose=true,
+                            include_info=false,
+                            accuracy_func=lightdark_accuracy_func)
+
+    solver.n_buffer = 2 # solver.n_iterations
+
+    solver.mcts_solver.n_iterations = 100
+    solver.mcts_solver.exploration_constant = 1.0 # NOTE: 2.0
+    solver.mcts_solver.k_state = 2.0
+
+    solver.onestep_solver.n_actions = 20
+    solver.onestep_solver.n_obs = 2
+
+    # Gaussian proccess
+    solver.use_nn = false
+    solver.gp_params.n_samples = 500
+    solver.gp_params.λ_lcb = 0.5
+    solver.gp_params.verbose_plot = true
+
+    # Neural network
+    solver.nn_params.training_epochs = 1000
+    solver.nn_params.n_samples = solver.gp_params.n_samples # Same as Gaussian proccess
+    solver.nn_params.verbose_plot_frequency = 100
+    solver.nn_params.verbose_update_frequency = 100
+    solver.nn_params.learning_rate = 0.001 # NOTE: 0.005 (better validation: 0.001)
+    solver.nn_params.batchsize = 512
+    solver.nn_params.λ_regularization = 1e-5 # 1e-8 # NOTE: 0.00001 (better validation: 0.0001, even better validation: 0.001)
+    solver.nn_params.normalize_target = true
+    # solver.nn_params.loss_func = Flux.Losses.mse # NOTE: mean-squared error
+
+    policy = solve(solver, pomdp)
+    BetaZero.save_policy(policy, "policy_lightdark_pluto_gp_actions.bson")
 end
-
-
-
-solver = BetaZeroSolver(pomdp=pomdp,
-                        updater=up,
-                        belief_reward=lightdark_belief_reward,
-                        n_iterations=2,
-                        n_data_gen=1000,
-                        n_evaluate=0, # NOTE.
-                        n_holdout=0, # NOTE.
-                        use_random_policy_data_gen=false, # NOTE: Hack to use `data_gen_policy`
-                        use_onestep_lookahead_holdout=false,
-                        # data_gen_policy=HeuristicLightDarkPolicy(; pomdp),
-                        collect_metrics=true,
-                        verbose=true,
-                        include_info=false,
-                        accuracy_func=lightdark_accuracy_func)
-
-solver.n_buffer = solver.n_iterations # NOTE: solver.n_iterations
-
-solver.mcts_solver.n_iterations = 100
-solver.mcts_solver.exploration_constant = 1.0 # NOTE: 2.0
-solver.mcts_solver.k_state = 2.0
-# solver.mcts_solver.k_action = 1.0
-
-solver.onestep_solver.n_actions = 20
-solver.onestep_solver.n_obs = 2
-
-solver.network_params.training_epochs = 1000
-solver.network_params.n_samples = 5_000 # NOTE: 1000
-solver.network_params.verbose_plot_frequency = solver.network_params.training_epochs + 1
-solver.network_params.verbose_update_frequency = 100
-solver.network_params.learning_rate = 0.007 # NOTE: 0.005 (better validation: 0.001)
-solver.network_params.batchsize = 256
-solver.network_params.λ_regularization = 1e-4 # NOTE: 0.00001 (better validation: 0.0001, even better validation: 0.001)
-solver.network_params.normalize_target = true
-# solver.network_params.loss_func = Flux.Losses.mse # NOTE: mean-squared error
-
-policy = solve(solver, pomdp)
-# BetaZero.save_policy(policy, "policy_lightdark.bson")
 
 
 # results = BetaZero.tune_network_parameters(pomdp, solver; learning_rates=range(1e-1, 1e-7, length=10), λs=range(1e-1, 1e-7, length=10))
@@ -230,17 +166,17 @@ function hyperopt_tune(pomdp::POMDP, solver::BetaZeroSolver;
     for (i, lrc, lre, λ, loss_func, normalize_target) in ho
         lr = lrc * 10.0^lre
         @info "Tuning iteration: $i/$resources ($(round(i/resources*100, digits=3)))"
-        solver.network_params.learning_rate = lr
-        solver.network_params.λ_regularization = λ
-        solver.network_params.loss_func = loss_func
-        solver.network_params.normalize_target = normalize_target
+        solver.nn_params.learning_rate = lr
+        solver.nn_params.λ_regularization = λ
+        solver.nn_params.loss_func = loss_func
+        solver.nn_params.normalize_target = normalize_target
         loss_str = string(loss_func)
 
         @info "Tuning with: lr=$lr, λ=$λ, loss=$loss_str, normalize_target=$normalize_target"
         empty!(solver.data_buffer)
         f_prev = BetaZero.initialize_network(solver)
         BetaZero.generate_data!(pomdp, solver, f_prev; use_random_policy=solver.use_random_policy_data_gen, inner_iter=solver.n_data_gen, outer_iter=1)
-        f_curr = BetaZero.train_network(deepcopy(f_prev), solver; verbose=solver.verbose, results=results)
+        f_curr = BetaZero.train(deepcopy(f_prev), solver; verbose=solver.verbose, results=results)
 
         key = (lr, λ, loss_str, normalize_target)
         results[key]["network"] = f_curr
@@ -282,7 +218,7 @@ if false
     # network = BetaZero.initialize_network(solver)
     # @time returns0 = network(_B)
 
-    network = BetaZero.train_network(deepcopy(network), solver; verbose=true)
+    network = BetaZero.train(deepcopy(network), solver; verbose=true)
 
     histogram(returns0', label="learned model", alpha=0.5)
     histogram!(returns0', label="uninitialized model", alpha=0.5)

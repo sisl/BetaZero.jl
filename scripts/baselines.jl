@@ -50,16 +50,18 @@ function convert_to_pomcow(solver::BetaZeroSolver)
                          max_depth=solver.mcts_solver.depth)
 end
 
-function adjust_solver(solver, n_iterations)
+function adjust_policy_solver(policy, solver, n_iterations)
     policy = deepcopy(policy)
     policy.planner.solver.n_iterations = n_iterations
-    return policy
+    solver = deepcopy(solver)
+    solver.mcts_solver.n_iterations = n_iterations
+    return policy, solver
 end
 
 iteration_sweep = [10, 100, 1000, 10_000]
 i_iteration = 4
 n_iterations = iteration_sweep[i_iteration]
-solver.mcts_solver.n_iterations = n_iterations # linked to `policy.planner.solver`
+bz_policy, bz_solver = adjust_policy_solver(policy, solver, n_iterations)
 
 # action_obs_scale = 5
 # osla_n_actions = log(10,n_iterations)*i_iteration
@@ -68,12 +70,12 @@ osla_n_actions = n_iterations
 osla_n_obs = 1
 
 policies = Dict(
-    "BetaZero"=>policy,
-    "Random"=>RandomPolicy(pomdp),
-    "One-Step Lookahead"=>solve_osla(policy.network, pomdp, up, lightdark_belief_reward; n_actions=osla_n_actions, n_obs=osla_n_obs),
-    # "MCTS (zeroed values)"=>extract_mcts(solver, pomdp),
-    # "MCTS (rand. values)"=>extract_mcts_rand_values(solver, pomdp),
-    "POMCPOW"=>solve(convert_to_pomcow(solver), pomdp)
+    "BetaZero"=>bz_policy,
+    # "Random"=>RandomPolicy(pomdp),
+    # "One-Step Lookahead"=>solve_osla(bz_policy.network, pomdp, up, lightdark_belief_reward; n_actions=osla_n_actions, n_obs=osla_n_obs),
+    # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
+    # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
+    "POMCPOW"=>solve(convert_to_pomcow(bz_solver), pomdp)
 )
 
 n_runs = 1000
@@ -102,7 +104,7 @@ for (k,π) in policies
         μ_rd = round(μ, digits=n_digits)
         stderr_rd = round(σ/sqrt(n_runs), digits=n_digits)
     end
-    time_rd = round(timing.time, digits=n_digits)
+    time_rd = round(timing.time/n_runs, digits=2n_digits)
     @info "$k: $μ_rd ± $stderr_rd ($time_rd seconds)"
     latex_table[μ_rd] = "$k & \$$μ_rd \\pm $stderr_rd\$ & $time_rd s \\\\"
 end

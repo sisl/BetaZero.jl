@@ -21,8 +21,10 @@ solver = BetaZeroSolver(pomdp=pomdp,
 
 # solver.mcts_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
 # solver.onestep_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
-solver.network_params.verbose_plot_frequency = solver.network_params.training_epochs
-solver.network_params.verbose_update_frequency = 100
+solver.nn_params.verbose_plot_frequency = solver.nn_params.training_epochs
+solver.nn_params.verbose_update_frequency = 100
+solver.nn_params.learning_rate = 0.0001
+solver.nn_params.λ_regularization = 0.001
 
 policy = solve(solver, pomdp)
 # TODO: save network
