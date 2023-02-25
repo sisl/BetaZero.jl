@@ -12,10 +12,20 @@ using Distributed
     using Random
     using Statistics
     using StatsBase
+    using BSON
     using BetaZero
     using LightDark
     using Flux
     include("lightdark_representation.jl")
+
+    using LocalApproximationValueIteration
+    using LocalFunctionApproximation
+    using GridInterpolations
+
+    if !@isdefined(lavi_policy)
+        # serialization issues when re-loading policy
+        lavi_policy = BSON.load(joinpath(@__DIR__, "..", "policy_lavi.bson"))[:policy]
+    end
 end
 
 @everywhere begin
@@ -103,32 +113,34 @@ else
     solver = BetaZeroSolver(pomdp=pomdp,
                             updater=up,
                             belief_reward=lightdark_belief_reward,
-                            n_iterations=5,
-                            n_data_gen=1000,
-                            n_evaluate=0,
-                            n_holdout=0,
                             collect_metrics=true,
                             verbose=true,
                             include_info=false,
                             accuracy_func=lightdark_accuracy_func)
 
-    solver.n_buffer = solver.n_iterations
+    solver.params.n_iterations = 4
+    solver.params.n_data_gen = 100
+    solver.params.n_evaluate = 0
+    solver.params.n_holdout = 0
+    solver.params.n_buffer = 1
+    solver.params.use_nn = true # <---- GP or NN surrogate.
 
-    solver.mcts_solver.n_iterations = 100
+    solver.use_data_collection_policy = false
+    solver.data_collection_policy = lavi_policy
+
+    solver.mcts_solver.n_iterations = 1000 # NOTE: 100
     solver.mcts_solver.exploration_constant = 1.0 # NOTE: 2.0
     solver.mcts_solver.k_state = 2.0
-
-    solver.onestep_solver.n_actions = 20
-    solver.onestep_solver.n_obs = 2
+    solver.mcts_solver.tree_in_info = true # NOTE: required for policy vector
 
     # Gaussian proccess
-    solver.use_nn = true
     solver.gp_params.n_samples = 500
     solver.gp_params.λ_lcb = 0.0
     solver.gp_params.verbose_plot = true
+    solver.gp_params.kernel = BetaZero.Matern(1/2, log(0.45), log(0.1))
 
     # Neural network
-    solver.nn_params.training_epochs = 5000
+    solver.nn_params.training_epochs = 1000
     solver.nn_params.n_samples = solver.gp_params.n_samples # Same as Gaussian proccess
     solver.nn_params.verbose_plot_frequency = 100
     solver.nn_params.verbose_update_frequency = 100
@@ -139,7 +151,7 @@ else
     # solver.nn_params.loss_func = Flux.Losses.mse # NOTE: mean-squared error
 
     policy = solve(solver, pomdp)
-    BetaZero.save_policy(policy, "BetaZero/notebooks/policy_lightdark_pluto_nn.bson")
+    BetaZero.save_policy(policy, "BetaZero/notebooks/policy_lightdark_pluto_$(solver.params.use_nn ? "nn" : "gp")_lavi.bson")
 end
 
 

@@ -21,3 +21,22 @@ function get_input_size(pomdp::POMDP, up::Updater)
     b̃ = input_representation(b0)
     return size(b̃)
 end
+
+
+"""
+Save figures as PNG with higher (or custom) dpi.
+"""
+bettersavefig(filename; kwargs...) = bettersavefig(plot!(), filename; kwargs...)
+function bettersavefig(fig, filename; dpi=300)
+    filename_png, filename_svg = "$filename.png", "$filename.svg"
+    Plots.savefig(fig, filename_svg)
+    if Sys.iswindows()
+        run(`inkscape -f $filename_svg -e $filename_png -d $dpi`)
+    else
+        run(`inkscape $filename_svg -o $filename_png -d $dpi`)
+    end
+    rm(filename_svg)
+end
+
+
+normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))

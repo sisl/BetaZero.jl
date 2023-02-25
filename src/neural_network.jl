@@ -44,9 +44,9 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     x_valid, y_valid = data_valid.X, data_valid.Y
 
     normalize_func(x, μ, σ) = (x .- μ) ./ σ
-    
+
     # Normalize input values close to the range of [-1, 1]
-    normalize_input = true
+    normalize_input = false
     if normalize_input
         # Normalize only based on the training data (but apply it to training and validation data)
         mean_x = mean(x_train, dims=ndims(x_train))
@@ -58,10 +58,10 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     # Normalize target values close to the range of [-1, 1]
     if normalize_target
         # Normalize only based on the training data (but apply it to training and validation data)
-        mean_y = mean(y_train)
-        std_y = std(y_train)
-        y_train = normalize_func(y_train, mean_y, std_y)
-        y_valid = normalize_func(y_valid, mean_y, std_y)
+        mean_y = mean(y_train[1,:])
+        std_y = std(y_train[1,:])
+        y_train[1,:] = normalize_func(y_train[1,:], mean_y, std_y)
+        y_valid[1,:] = normalize_func(y_valid[1,:], mean_y, std_y)
     end
 
     verbose && @info "Data set size: $(n_train):$(n_valid) (training:validation)"
@@ -85,14 +85,23 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     # Remove un-normalization layer (if added from previous iteration)
     # We want to train for values close to [-1, 1]
     if isa(f.layers[1], Function) && normalize_input
+        error("PLEASE IMPLEMENT INPUT NORMALIZATION")
         f = Chain(f.layers[2:end]...)
     end
 
     # Remove un-normalization layer (if added from previous iteration)
     # We want to train for values close to [-1, 1]
-    if isa(f.layers[end], Function) && normalize_target
-        f = Chain(f.layers[1:end-1]...)
+    heads = f.layers[end]
+    value_head = heads.layers.value_head
+    if isa(value_head.layers[end], Function) && normalize_target
+        policy_head = heads.layers.policy_head
+        value_head = Chain(value_head.layers[1:end-1]...)
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+        f = Chain(f.layers[1:end-1]..., heads)
     end
+    # if isa(f.layers[end], Function) && normalize_target
+    #     f = Chain(f.layers[1:end-1]...)
+    # end
 
     # Put network on GPU for training
     f = device(f)
@@ -101,8 +110,18 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     sqnorm(x) = sum(abs2, x)
     penalty() = λ*sum(sqnorm, Flux.params(f))
-    sign_accuracy(x, y) = mean(sign.(f(x)) .== sign.(y)) # TODO: Generalize
-    loss(x, y) = nn_params.loss_func(f(x), y) + penalty()
+    sign_accuracy(x, y) = mean(sign.(f(x)[1,:]) .== sign.(y[1,:])) # TODO: Generalize
+    loss(x, y) = begin
+        local ỹ = f(x)
+        # vmask = Flux.CuArray([1,0,0,0])
+        vmask = Flux.CuArray(vcat(1, zeros(Int,size(ỹ,1)-1)))
+        pmask = 1 .- vmask
+        v = vmask .* ỹ # value prediction
+        𝐩 = pmask .* ỹ # policy prediction
+        z = vmask .* y # true value
+        π = pmask .* y # true policy vector
+        nn_params.loss_func(v, z) + Flux.Losses.crossentropy(𝐩, π) + penalty()
+    end
 
     opt = Adam(lr)
     θ = Flux.params(f)
@@ -153,11 +172,21 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     if normalize_target
         # Add un-normalization output layer
         unnormalize_y = y -> (y .* std_y) .+ mean_y
-        f = Chain(f.layers..., unnormalize_y)
+        heads = f.layers[end]
+        value_head = heads.layers.value_head
+        value_head = Chain(value_head.layers..., unnormalize_y)
+        policy_head = heads.layers.policy_head
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+        f = Chain(f.layers[1:end-1]..., heads)
     end
+    # if normalize_target
+    #     # Add un-normalization output layer
+    #     unnormalize_y = y -> (y .* std_y) .+ mean_y
+    #     f = Chain(f.layers..., unnormalize_y)
+    # end
 
-    value_model = normalize_input ? f(unnormalize_x(cpu(x_valid)))' : f(cpu(x_valid))'
-    value_data = normalize_target ? unnormalize_y(cpu(y_valid))' : cpu(y_valid)'
+    value_model = normalize_input ? f(unnormalize_x(cpu(x_valid)))[1,:] : f(cpu(x_valid))[1,:]
+    value_data = normalize_target ? unnormalize_y(cpu(y_valid))[1,:] : cpu(y_valid)[1,:]
 
     if nn_params.verbose_plot_frequency != Inf
         value_distribution = nothing
@@ -168,8 +197,8 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
             plot_bias(value_model, value_data)
             display(Plots.title!("validation data"))
 
-            value_model_training = normalize_input ? f(unnormalize_x(cpu(x_train)))' : f(cpu(x_train))'
-            value_data_training = normalize_target ? unnormalize_y(cpu(y_train))' : cpu(y_train)'
+            value_model_training = normalize_input ? f(unnormalize_x(cpu(x_train)))[1,:] : f(cpu(x_train))[1,:]
+            value_data_training = normalize_target ? unnormalize_y(cpu(y_train))[1,:] : cpu(y_train)[1,:]
             plot_bias(value_model_training, value_data_training)
             display(Plots.title!("training data"))
         catch err
@@ -208,7 +237,7 @@ end
 
 
 """
-Evaluate the neural network `f` using the `belief` as input.
+Evaluate the neural network `f` using the `belief` as input, return the predicted value.
 Note, inference is done on the CPU given a single input.
 """
 function value_lookup(belief, f::Chain)
@@ -216,7 +245,31 @@ function value_lookup(belief, f::Chain)
     x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
     y = f(x) # evaluate network `f`
     value = cpu(y)
-    return length(value) == 1 ? value[1] : value
+    return value[1]
+    # return length(value) == 1 ? value[1] : value
+end
+
+
+"""
+Evaluate the neural network `f` using the `belief` as input, return the predicted policy vector.
+Note, inference is done on the CPU given a single input.
+"""
+function policy_lookup(belief, f::Chain)
+    b = Float32.(input_representation(belief))
+    x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
+    y = f(x) # evaluate network `f`
+    value = cpu(y)
+    return value[2:end]
+end
+
+
+"""
+Use predicted policy vector to sample next action.
+"""
+function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Chain)
+    p = policy_lookup(belief, f)
+    as = POMDPs.actions(problem) # TODO: actions(problem, belief) ??
+    return rand(SparseCat(as, p))
 end
 
 

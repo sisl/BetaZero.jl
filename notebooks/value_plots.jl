@@ -50,6 +50,9 @@ end
 # ╔═╡ 5a5c8125-d8ed-4664-b5a2-a20819a81920
 using PlutoUI
 
+# ╔═╡ bda2e95f-b22f-4ba1-95ba-f973669e31d9
+using BSON
+
 # ╔═╡ 40b78b0d-ddd0-4880-92ba-6bb6c5cb1668
 HTML("""
 <!-- the wrapper span -->
@@ -114,14 +117,22 @@ end
 
 # ╔═╡ c0f29e13-bdce-4908-9e9a-6001c88e5ed9
 # policy = BetaZero.load_policy("policy_lightdark_pluto5.bson");
-policy = BetaZero.load_policy("policy_lightdark_pluto_nn.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_do0.75.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_reginputs.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_2buffer_5000epochs.bson");
+policy = BetaZero.load_policy("policy_lightdark_pluto_nn_lavi.bson");
 
 # ╔═╡ 1bb8df23-575a-479b-a4ce-3ceb3eb7acbf
 # solver = BetaZero.load_solver("solver_lightdark_pluto_nn.bson");
-solver = BetaZero.load_solver("solver_lightdark_pluto_gp_1iter.bson");
+# solver = BetaZero.load_solver("solver_lightdark_pluto_gp_1iter.bson");
 
 # ╔═╡ 6309e3f0-29c9-4963-a2d1-f6fcb5f3ada4
-policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_1iter.bson");
+# policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_1iter.bson");
+# policy_gp = BetaZero.load_policy("policy_gp_regression.bson")
+# policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_2buffer_10ll.bson")
+# policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_2buffer.bson")
+# policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_musig.bson")
+policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_lavi.bson")
 
 # ╔═╡ 80c2be9e-a242-4e9d-a082-8c61cfe5ae74
 policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions_20iters.bson");
@@ -147,6 +158,19 @@ begin
 	plot(vp_nn, vp_gp, layout=[1 1], size=(700,250), margin=2Plots.mm)
 end
 
+# ╔═╡ 03ff8055-8725-4935-8a09-cb1ea6bf6e35
+begin
+	Σ = 0:0.05:5
+	M = -20:0.2:20
+	# NOTE x-y flip.
+	# Y = (y,x)->policy.surrogate(Float32.([x y fixed_skew fixed_kurt fixed_obs])')[1]
+	Y = (y,x)->policy.surrogate(Float32.([x y])')[1]
+end;
+
+# ╔═╡ 769e3159-bf5e-4294-b7b9-9e49a32406a1
+# NOTE x-y flip.
+Y_gp = (y,x)->policy_gp.surrogate(Float64.([x y])')[1]
+
 # ╔═╡ 812bd7a7-70af-4581-9170-8ce8af05bd14
 function shifted_colormap(X; kwargs...)
 	xmin, xmax = minimum(X), maximum(X)
@@ -166,35 +190,21 @@ fixed_skew, fixed_kurt = 0, 0
 # ╔═╡ c84e0d55-33e3-415e-b108-51efd3a13717
 @bind fixed_obs Slider(-30:0.1:30, default=0, show_value=true)
 
-# ╔═╡ 03ff8055-8725-4935-8a09-cb1ea6bf6e35
-begin
-	Σ = 0:0.1:5
-	M = -10:0.1:10
-	Y = [policy.surrogate(Float32.([μ σ fixed_skew fixed_kurt fixed_obs])')[1]
-			for μ in M, σ in Σ]
-end;
-
-# ╔═╡ 769e3159-bf5e-4294-b7b9-9e49a32406a1
-Y_gp = [policy_gp.surrogate(Float64.([μ σ fixed_skew fixed_kurt fixed_obs])')[1]
-			for μ in M, σ in Σ];
-
 # ╔═╡ 3bbc44ce-b0b2-4c81-8ec9-d4819bd8ba49
-heatmap(Σ, M, Y, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (NN)", cmap=cmap = shifted_colormap(Y))
+heatmap(Σ, M, Y, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (NN)", cmap=cmap = shifted_colormap([Y(x,y) for x in Σ for y in M]))
 
 # ╔═╡ 4f5e76f2-97d3-418e-a1e5-2fc558fbddcb
-heatmap(Σ, M, Y_gp, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap(Y_gp))
+heatmap(Σ, M, Y_gp, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap([Y_gp(x,y) for x in Σ for y in M]))
 
 # ╔═╡ 7f8ae7e3-8144-4d38-b398-edecf5fc396f
 @bind fixed_action Slider([-1, 0, 1], default=0, show_value=true)
 
 # ╔═╡ 42b011d7-268b-4c9f-94d9-bbc4981847c1
-Y_gp_a = [policy_gp_a.surrogate(Float64.([μ σ fixed_skew fixed_kurt fixed_action fixed_obs])')[1] for μ in M, σ in Σ];
+# NOTE x-y flip.
+Y_gp_a = (y,x)->policy_gp_a.surrogate(Float64.([x y fixed_skew fixed_kurt fixed_action fixed_obs])')[1]
 
 # ╔═╡ 607ed6b8-af59-402a-b9ba-6786bb3f248c
-heatmap(Σ, M, Y_gp_a, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap(Y_gp_a))
-
-# ╔═╡ 9186d51c-dac7-4b21-b4eb-3cd724bb1a3e
-data = BetaZero.sample_data(solver.data_buffer_valid, 1000)
+# heatmap(Σ, M, Y_gp_a, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap([Y_gp_a(x,y) for x in Σ for y in M]))
 
 # ╔═╡ ce006bd6-d691-4efb-b740-4ddc258416c4
 pomdp = solver.pomdp;
@@ -235,13 +245,13 @@ policy2 = BetaZeroPolicy(policy.surrogate, solve(solver.mcts_solver, solver.bmdp
 
 # ╔═╡ 4b0b6f23-1fca-4907-bdb3-eafb3bbc9606
 begin
-	n = 20
+	n = 10
 	expectation = []
 	predicted = []
 	for i in 1:n
 		b0 = initialize_belief(up, ds0)
 		s0 = rand(b0)
-		𝔼G = [simulate(RolloutSimulator(max_steps=100), pomdp, policy_gp2, up, b0, s0) for _ in 1:10]
+		𝔼G = [simulate(RolloutSimulator(max_steps=200), pomdp, policy_gp2, up, b0, s0) for _ in 1:10]
 		Ṽ = policy_gp2.surrogate(BetaZero.input_representation(b0))[1]
 		push!(expectation, mean(𝔼G))
 		push!(predicted, Ṽ)
@@ -269,9 +279,187 @@ end
 # ╔═╡ 343bdb4e-f9ba-4c10-a711-750d695652f7
 plot_bias_2(predicted, expectation)
 
+# ╔═╡ 6572e23c-d4f4-4803-8034-6613fdf18960
+md"""
+# Gaussian process regression
+"""
+
+# ╔═╡ 410bdb7a-a201-47fb-9a92-9910b5b93ca0
+data2 = BSON.load("data2.bson")[:data2];
+
+# ╔═╡ 59ca30e3-7397-4245-8985-c25795e46750
+m = 100
+
+# ╔═╡ d4d9e5b3-3f6c-4936-9592-8b08ed02a09e
+begin
+    X = data.X[:,1:m]'
+    X2 = data2.X[:,1:m]'
+    y = data.Y[1:m]
+    y2 = data2.Y[1:m]
+	gp_X = Float64.(X)'
+    gp_mean = MeanConst(Float64(mean(y)))
+end; md"$X,y$"
+
+# ╔═╡ 88362011-8e3b-45de-b451-57265459aa71
+fgp = gp->xy->predict_f(gp, Float64.(reshape(xy, (:,1))))[1][1] # mean
+
+# ╔═╡ 6b2514dd-4312-4030-b4b0-d26d6f936c5d
+@bind ℓ_slide Slider([0.1;], show_value=true)
+
+# ╔═╡ 46166104-92e8-4f5a-bcd4-35435f18aa63
+@bind σ_slide Slider([0.1;], show_value=true)
+
+# ╔═╡ baa3ab4f-be38-4851-a851-4a37b38a3f66
+begin
+    ν = 1/2
+
+	ll = log(ℓ_slide)
+	# ll = log(0.45)
+
+	lσ = log(σ_slide)
+	# lσ = log(0.1)
+
+	# kernel = Matern(ν, ll, lσ)
+	kernel = SE(ll, lσ)
+
+	gp = GP(gp_X, y, gp_mean, kernel)
+	f = fgp(gp)
+end
+
+# ╔═╡ e56a6370-00e5-4305-8062-8106dc2df9cb
+begin
+	gp_error(x, y) = (y - f(x))^2
+	mean_error_train = mean(gp_error(xi, yi) for (xi,yi) in zip(eachrow(X), y))
+	mean_error_valid = mean(gp_error(xi, yi) for (xi,yi) in zip(eachrow(X2), y2))
+	@info "Mean error (train): $mean_error_train"
+	@info "Mean error (validation): $mean_error_valid"
+end
+
+# ╔═╡ fc28e360-a595-46e3-ba32-d917ce0b9f63
+begin
+	loss_train = Float64[]
+	loss_valid = Float64[]
+	ℓ_range = range(0.2, 5, length=20)
+	σ_range = range(0.1, 50, length=20)
+	losses = Matrix{Float64}(undef, length(ℓ_range), length(σ_range))
+	for (i,ℓ) in enumerate(ℓ_range)
+		for (j,σ) in enumerate(σ_range)
+			ll = log(ℓ)
+		    lσ = log(σ)
+		    kernel = SE(ll, lσ)
+		    gp = GP(gp_X, y, gp_mean, kernel)
+		    f = xy->predict_f(gp, Float64.(reshape(xy, (:,1))))[1][1]
+
+			loss = (x, y)->(y - f(x))^2
+			err_train = mean(loss(xi, yi) for (xi,yi) in zip(eachrow(X), y))
+			err_valid = mean(loss(xi, yi) for (xi,yi) in zip(eachrow(X2), y2))
+			@info "ℓ=$ℓ, σ=$(σ): $((err_train, err_valid))"
+			push!(loss_valid, err_valid)
+			push!(loss_train, err_train)
+			losses[i,j] = err_valid
+		end
+	end
+end
+
+# ╔═╡ 2e512cda-bba3-4cc9-9110-132ffa37e9e5
+begin
+	# heatmap(ℓ_range, σ_range, reshape(loss_valid, (length(ℓ_range),length(σ_range)))')
+	heatmap(ℓ_range, σ_range, losses')
+	xlabel!("\$\\ell\$")
+	ylabel!("\$\\sigma\$")
+end
+
+# ╔═╡ 1ae1a1e8-aaec-47b2-9ced-6fd8afc48b9e
+begin
+	best = argmin(losses)
+	# ℓ = ℓ_range[best.I[1]]
+	# σ = σ_range[best.I[2]]
+end
+
+# ╔═╡ 01f7dcdf-fff2-4b58-93da-585c1cebd193
+ℓ_range[best.I[1]], σ_range[best.I[2]]
+
+# ╔═╡ b9cb080f-087f-4d4b-b575-2190652b92ea
+begin
+	plot(loss_valid, label="valid")
+	plot!(loss_train, label="train")
+end
+
+# ╔═╡ 8f2b6e82-4e3d-440d-ba16-ad043b833b97
+normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))
+
+# ╔═╡ 9ee1c3b0-d600-402f-bc42-4fa2feeee807
+begin
+	x1min, x1max = minimum(X[:,1]), maximum(X[:,1])
+	x2min, x2max = minimum(X[:,2]), maximum(X[:,2])
+	x1min2, x1max2 = minimum(X2[:,1]), maximum(X2[:,1])
+	x2min2, x2max2 = minimum(X2[:,2]), maximum(X2[:,2])
+	x1min = min(x1min, x1min2)
+	x1max = max(x1max, x1max2)
+	x2min = min(x2min, x2min2)
+	x2max = max(x2max, x2max2)
+	ymin, ymax = minimum(y), maximum(y)
+	ymin2, ymax2 = minimum(y2), maximum(y2)
+
+	pltX = x2min:0.01:x2max
+	pltY = x1min:0.1:x1max
+
+	# cmap = shifted_colormap(y)
+	gp_ỹ = [f([x,y]) for x in pltY, y in pltX] # NOTE x-y flip
+	# gp_ỹ = [f([x,y,0,0,0]) for x in pltY, y in pltX] # NOTE x-y flip
+	cmap_data = shifted_colormap([min(ymin,ymin2), max(ymax,ymax2)])
+	cmap_model = shifted_colormap(gp_ỹ)
+end
+
+# ╔═╡ c361ac8e-51bf-436b-a195-b728ceceb4ce
+begin
+	gp_plts = []
+	for training in [true, false]
+		plot(size=(800,400), legend=:outerbottomleft)
+	
+		# NOTE: Switch (μ on y-axis, σ on x-axis)
+		# heatmap!(pltX, pltY, (y,x)->f([x,y,0,0,0]), c=cmap_model)
+		heatmap!(pltX, pltY, gp_ỹ, c=cmap_model)
+		training && push!(gp_plts, deepcopy(plot!()))
+
+		if training
+			scatter!(X[:,2], X[:,1], cmap=[get(cmap_data, normalize01(yi,y)) for yi in y], marker=:square, msc=:gray, alpha=0.5, label="–training-")
+		else
+			scatter!(X2[:,2], X2[:,1], cmap=[get(cmap_data, normalize01(yi,y2)) for yi in y2], marker=:circle, msc=:black, alpha=0.5, label="validation")
+		end
+	
+		xlabel!("\$\\sigma(b)\$")
+		ylabel!("\$\\mu(b)\$")
+		title!(training ? "training" : "validation")
+		push!(gp_plts, plot!())
+	end
+end
+
+# ╔═╡ ce515ed9-bac3-4b48-977f-c94937eebe8f
+gp_plts[2]
+
+# ╔═╡ eebb4757-83de-490a-84d5-52f988708c3a
+gp_plts[1]
+
+# ╔═╡ ddbf075e-539e-49a7-8a1b-a8e7b6eb644f
+gp_plts[2]
+
+# ╔═╡ 1fa63234-37e4-4b12-a064-6a55b2ee0b67
+gp_plts[3]
+
+# ╔═╡ 9186d51c-dac7-4b21-b4eb-3cd724bb1a3e
+# ╠═╡ disabled = true
+#=╠═╡
+data = BetaZero.sample_data(solver.data_buffer_valid, 1000)
+  ╠═╡ =#
+
+# ╔═╡ fa79f064-81df-476c-a3fb-5271bee3cd5a
+data = BSON.load("data1.bson")[:data];
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
 BetaZero = "c2a2f090-4363-4bef-a985-c7cb903c4681"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
@@ -294,6 +482,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+BSON = "~0.3.6"
 BetaZero = "~0.1.0"
 DataStructures = "~0.18.13"
 Distributions = "~0.25.81"
@@ -319,7 +508,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "24b87ce642d5d930dfd0917ddb34a62ce8c32e89"
+project_hash = "9f5b629b3d400ea6cbc2e7a023fec1e322578688"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -399,14 +588,8 @@ git-tree-sha1 = "aebf55e6d7795e02ca500a689d326ac979aaf89e"
 uuid = "9718e550-a3fa-408a-8086-8db961cd8217"
 version = "0.1.1"
 
-[[deps.BeliefUpdaters]]
-deps = ["POMDPTools", "POMDPs", "Random", "Statistics", "StatsBase"]
-git-tree-sha1 = "8819a9a0e9e9002125ae55626e10f0c210959c30"
-uuid = "8bb6e9a1-7d73-552c-a44a-e5dc5634aac4"
-version = "0.2.3"
-
 [[deps.BetaZero]]
-deps = ["BSON", "BeliefUpdaters", "DataStructures", "Distributed", "Flux", "GaussianProcesses", "MCTS", "POMDPTools", "POMDPs", "Parameters", "Plots", "ProgressMeter", "Random", "Statistics", "StatsBase", "Suppressor", "UnicodePlots"]
+deps = ["BSON", "DataStructures", "Distributed", "Flux", "GaussianProcesses", "LinearAlgebra", "MCTS", "POMDPTools", "POMDPs", "Parameters", "Plots", "ProgressMeter", "Random", "Statistics", "StatsBase", "Suppressor", "UnicodePlots"]
 path = "../../home/mossr/src/scerf/BetaZero"
 uuid = "c2a2f090-4363-4bef-a985-c7cb903c4681"
 version = "0.1.0"
@@ -2060,5 +2243,28 @@ version = "1.4.1+0"
 # ╠═343bdb4e-f9ba-4c10-a711-750d695652f7
 # ╠═6213273f-0417-4cbc-9eff-9add06948401
 # ╠═8d422b96-b8ef-4d36-ab80-41d404cf4ff0
+# ╟─6572e23c-d4f4-4803-8034-6613fdf18960
+# ╠═ce515ed9-bac3-4b48-977f-c94937eebe8f
+# ╠═bda2e95f-b22f-4ba1-95ba-f973669e31d9
+# ╠═fa79f064-81df-476c-a3fb-5271bee3cd5a
+# ╠═410bdb7a-a201-47fb-9a92-9910b5b93ca0
+# ╠═59ca30e3-7397-4245-8985-c25795e46750
+# ╟─d4d9e5b3-3f6c-4936-9592-8b08ed02a09e
+# ╠═88362011-8e3b-45de-b451-57265459aa71
+# ╠═6b2514dd-4312-4030-b4b0-d26d6f936c5d
+# ╠═46166104-92e8-4f5a-bcd4-35435f18aa63
+# ╠═baa3ab4f-be38-4851-a851-4a37b38a3f66
+# ╠═e56a6370-00e5-4305-8062-8106dc2df9cb
+# ╠═fc28e360-a595-46e3-ba32-d917ce0b9f63
+# ╠═2e512cda-bba3-4cc9-9110-132ffa37e9e5
+# ╠═1ae1a1e8-aaec-47b2-9ced-6fd8afc48b9e
+# ╠═01f7dcdf-fff2-4b58-93da-585c1cebd193
+# ╠═b9cb080f-087f-4d4b-b575-2190652b92ea
+# ╠═8f2b6e82-4e3d-440d-ba16-ad043b833b97
+# ╠═9ee1c3b0-d600-402f-bc42-4fa2feeee807
+# ╠═c361ac8e-51bf-436b-a195-b728ceceb4ce
+# ╠═eebb4757-83de-490a-84d5-52f988708c3a
+# ╠═ddbf075e-539e-49a7-8a1b-a8e7b6eb644f
+# ╠═1fa63234-37e4-4b12-a064-6a55b2ee0b67
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

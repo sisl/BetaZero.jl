@@ -1,4 +1,18 @@
 """
+Parameters for the BetaZero algorithm.
+"""
+@with_kw mutable struct BetaZeroParameters
+    n_iterations::Int = 1 # BetaZero policy iterations (primary outer loop).
+    n_data_gen::Int = 10 # Number of episodes to run for training/validation data generation.
+    n_evaluate::Int = 0 # Number of episodes to run for surrogate evaluation and comparison.
+    n_holdout::Int = 10 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
+    n_buffer::Int = n_iterations # Number of iterations to keep data for surrogate training (NOTE: each simulation has multiple time steps of data, not counted in this number. This number corresponds to the number of iterations, i.e., set to 2 if you want to keep data from the previous 2 policy iterations.)
+    λ_ucb::Real = 0.0 # Upper confidence bound parameter: μ + λσ # TODO: Remove?
+    use_nn::Bool = true # Use neural network as the surrogate model
+end
+
+
+"""
 Parameters for neural network surrogate model.
 """
 @with_kw mutable struct BetaZeroNetworkParameters
@@ -21,8 +35,7 @@ end
 Parameters for Gaussian procces surrogate model.
 """
 @with_kw mutable struct BetaZeroGPParameters
-    kernel_params = (1/2, 10.0, 10.0) # Parameters for the chosen kernel (e.g., (ν, ll, lσ) for the Matern kernel)
-    kernel = Matern(kernel_params...)
+    kernel = Matern(1/2, 1.0, 10.0)
     input_size = (6,)
     n_samples::Int = 500 # Number of samples (i.e., simulated POMDP time steps from data collection) to use during training + validation
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
@@ -31,4 +44,14 @@ Parameters for Gaussian procces surrogate model.
     use_lcb::Bool = true # Use LCB when predicting
     use_lcb_initial::Bool = false # Use LCB when predicting initial GP (generally keep at `false` as the uncertainty is high with mean zero, leading to large negative initial value estimates)
     optimize::Bool = false # Indicate if GP params should be optimized to the training data (generally keep at `false`)
+end
+
+
+"""
+Collection of parameters, useful for storing with the policy to indicate what parameters were used.
+"""
+mutable struct ParameterCollection
+    params::BetaZeroParameters
+    nn_params::BetaZeroNetworkParameters
+    gp_params::BetaZeroGPParameters
 end

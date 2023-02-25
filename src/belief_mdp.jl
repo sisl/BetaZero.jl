@@ -29,6 +29,7 @@ end
 
 POMDPs.actions(bmdp::BeliefMDP{P,U,B,A}, b::B) where {P,U,B,A} = actions(bmdp.pomdp, b)
 POMDPs.actions(bmdp::BeliefMDP) = actions(bmdp.pomdp)
+POMDPs.actionindex(bmdp::BeliefMDP, a::Int) = findfirst(actions(bmdp) .== a)
 
 POMDPs.isterminal(bmdp::BeliefMDP, b) = all(isterminal(bmdp.pomdp, s) for s in support(b))
 
@@ -48,7 +49,6 @@ end
 function POMDPs.initialstate(bmdp::BeliefMDP)
     return Deterministic(initialize_belief(bmdp.updater, initialstate(bmdp.pomdp)))
 end
-
 
 # deprecated in POMDPs v0.9
 function POMDPs.initialstate(bmdp::BeliefMDP, rng::AbstractRNG)

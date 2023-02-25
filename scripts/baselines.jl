@@ -50,18 +50,24 @@ function convert_to_pomcow(solver::BetaZeroSolver)
                          max_depth=solver.mcts_solver.depth)
 end
 
-function adjust_policy_solver(policy, solver, n_iterations)
+function adjust_policy(policy, n_iterations)
     policy = deepcopy(policy)
     policy.planner.solver.n_iterations = n_iterations
-    solver = deepcopy(solver)
-    solver.mcts_solver.n_iterations = n_iterations
-    return policy, solver
+    return policy
 end
 
+function adjust_solver(solver, n_iterations)
+    solver = deepcopy(solver)
+    solver.mcts_solver.n_iterations = n_iterations
+    return solver
+end
+
+
 iteration_sweep = [10, 100, 1000, 10_000]
-i_iteration = 4
+i_iteration = 3
 n_iterations = iteration_sweep[i_iteration]
-bz_policy, bz_solver = adjust_policy_solver(policy, solver, n_iterations)
+bz_policy = adjust_policy(policy, n_iterations)
+bz_solver = adjust_solver(solver, n_iterations)
 
 # action_obs_scale = 5
 # osla_n_actions = log(10,n_iterations)*i_iteration
@@ -69,13 +75,20 @@ bz_policy, bz_solver = adjust_policy_solver(policy, solver, n_iterations)
 osla_n_actions = n_iterations
 osla_n_obs = 1
 
+@everywhere begin
+    using LocalApproximationValueIteration
+    using LocalFunctionApproximation
+    using GridInterpolations
+end
+
 policies = Dict(
     "BetaZero"=>bz_policy,
     # "Random"=>RandomPolicy(pomdp),
     # "One-Step Lookahead"=>solve_osla(bz_policy.surrogate, pomdp, up, lightdark_belief_reward; n_actions=osla_n_actions, n_obs=osla_n_obs),
     # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
     # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
-    "POMCPOW"=>solve(convert_to_pomcow(bz_solver), pomdp)
+    "POMCPOW"=>solve(convert_to_pomcow(bz_solver), pomdp),
+    "LAVI"=>lavi_policy,
 )
 
 n_runs = 1000

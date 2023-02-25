@@ -18,7 +18,11 @@ function value_plot(policy; σ=0, s=0, k=0, a=0, o=0)
     try
         Y = [policy.surrogate(Float32.([y σ s k o])')[1] for y in X]
     catch err
-        Y = [policy.surrogate(Float32.([y σ s k a o])')[1] for y in X]
+        try
+            Y = [policy.surrogate(Float32.([y σ s k a o])')[1] for y in X]
+        catch err2
+            Y = [policy.surrogate(Float32.([y σ])')[1] for y in X]
+        end
     end
     plot(X, Y, label=false, xlabel="belief mean: \$μ(b)\$", ylabel="value est.", c=:crimson, lw=2)
     Plots.hline!([0], label=false, c=:black, style=:dash)
