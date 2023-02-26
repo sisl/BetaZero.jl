@@ -64,7 +64,7 @@ end
 
 
 iteration_sweep = [10, 100, 1000, 10_000]
-i_iteration = 3
+i_iteration = 1
 n_iterations = iteration_sweep[i_iteration]
 bz_policy = adjust_policy(policy, n_iterations)
 bz_solver = adjust_solver(solver, n_iterations)

@@ -222,6 +222,7 @@ Generate training data using online MCTS with the best surrogate so far `f` (par
 function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
                         outer_iter::Int=0, inner_iter::Int=solver.params.n_data_gen,
                         store_metrics::Bool=false, store_data::Bool=true,
+                        return_metrics::Bool=false,
                         use_different_policy::Bool=false)
     # Confirm that surrogate is on the CPU for inference
     f = cpu(f)
@@ -290,8 +291,8 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     end
 
     if solver.verbose
-        μ, σ = mean_and_std(returns)
-        n_returns = length(returns)
+        μ, σ = mean_and_std(G)
+        n_returns = length(G)
         @info "Generated data return statistics: $(round(μ, digits=3)) ± $(round(σ/sqrt(n_returns), digits=3))"
     end
 
@@ -331,7 +332,7 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         push!(solver.data_buffer_valid, data_valid)
     end
 
-    return data
+    return return_metrics ? (data, metrics) :  data
 end
 
 
@@ -401,7 +402,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     γ = POMDPs.discount(pomdp)
     G = compute_returns(rewards; γ=γ)
 
-    skip_missing_reward_signal = true
+    skip_missing_reward_signal = false # NOTE.
 
     if skip_missing_reward_signal && iszero(G) && max_reached
         # ignore cases were the time limit has been reached and no reward signal is present
@@ -438,16 +439,19 @@ Run a test on a holdout set to collect performance metrics during BetaZero polic
 function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate; outer_iter::Int=0)
     if solver.params.n_holdout > 0
         solver.verbose && @info "Running holdout test..."
-        returns = generate_data!(pomdp, solver, f;
+        data, metrics = generate_data!(pomdp, solver, f;
                                  inner_iter=solver.params.n_holdout, outer_iter=outer_iter,
-                                 store_metrics=false, store_data=false)[:G]
+                                 store_metrics=false, store_data=false, return_metrics=true)
+        returns = data.G
+        accuracies = [m.accuracy for m in metrics]
+        num_actions = [m.num_actions for m in metrics]
         try
             solver.verbose && display(UnicodePlots.histogram(returns))
         catch err
             @warn "Couldn't fit holdout histogram: $err"
         end
         μ, σ = mean_and_std(returns)
-        push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns))
+        push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns, accuracies=accuracies, num_actions=num_actions))
         solver.verbose && @show μ, σ
     end
 end

@@ -32,6 +32,7 @@ begin
 	using MCTS
 	using DataStructures
 	using GaussianProcesses
+	using LinearAlgebra
     using Pkg	
 end
 
@@ -158,6 +159,9 @@ begin
 	plot(vp_nn, vp_gp, layout=[1 1], size=(700,250), margin=2Plots.mm)
 end
 
+# ╔═╡ 07aa5bc1-0a89-4de5-aba7-b74265b7bbed
+as = [-1, 0, 1]
+
 # ╔═╡ 03ff8055-8725-4935-8a09-cb1ea6bf6e35
 begin
 	Σ = 0:0.05:5
@@ -165,6 +169,9 @@ begin
 	# NOTE x-y flip.
 	# Y = (y,x)->policy.surrogate(Float32.([x y fixed_skew fixed_kurt fixed_obs])')[1]
 	Y = (y,x)->policy.surrogate(Float32.([x y])')[1]
+	Yπ = (y,x)->as[argmax(policy.surrogate(Float32.([x y])')[2:end])]
+	# Yπ = (y,x)->rand(SparseCat(as, policy.surrogate(Float32.([x y])')[2:end]))
+	Ydata = [Y(x,y) for y in M, x in Σ]
 end;
 
 # ╔═╡ 769e3159-bf5e-4294-b7b9-9e49a32406a1
@@ -190,8 +197,27 @@ fixed_skew, fixed_kurt = 0, 0
 # ╔═╡ c84e0d55-33e3-415e-b108-51efd3a13717
 @bind fixed_obs Slider(-30:0.1:30, default=0, show_value=true)
 
+# ╔═╡ 848d0d9c-f036-44a1-8ce4-ba12798cd538
+function normalize_range(X, a, b)
+	xmin = minimum(X)
+	xmax = maximum(X)
+	return (b - a) * (X .- xmin) / (xmax - xmin) .+ a
+end
+
+# ╔═╡ 9b4afdca-9c87-4e88-8199-7fa17c2403fe
+Ydata′ = clamp.(Ydata, -100, 100); # normalize_range(Ydata, -100, 100);
+
 # ╔═╡ 3bbc44ce-b0b2-4c81-8ec9-d4819bd8ba49
-heatmap(Σ, M, Y, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (NN)", cmap=cmap = shifted_colormap([Y(x,y) for x in Σ for y in M]))
+heatmap(Σ, M, Ydata′, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (NN)", cmap=shifted_colormap(Ydata′))
+
+# ╔═╡ 4c81fcc5-b50b-4ecd-a0f4-f3ddfe3fad19
+SparseCat(reverse(as), reverse(policy.surrogate(Float32.([0 0])')[2:end]))
+
+# ╔═╡ 64f10375-ad0b-4640-b117-fe96bf1ea9e1
+heatmap(Σ, M, Yπ, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (NN)", cmap=palette(:viridis, 3))
+
+# ╔═╡ 0feeb06c-3f6d-4ec7-b795-9a1c52fc0e69
+0.90^20 * 100 # e.g., up +1x10, down +1x10, stop action 0
 
 # ╔═╡ 4f5e76f2-97d3-418e-a1e5-2fc558fbddcb
 heatmap(Σ, M, Y_gp, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap([Y_gp(x,y) for x in Σ for y in M]))
@@ -205,6 +231,12 @@ Y_gp_a = (y,x)->policy_gp_a.surrogate(Float64.([x y fixed_skew fixed_kurt fixed_
 
 # ╔═╡ 607ed6b8-af59-402a-b9ba-6786bb3f248c
 # heatmap(Σ, M, Y_gp_a, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap([Y_gp_a(x,y) for x in Σ for y in M]))
+
+# ╔═╡ 9186d51c-dac7-4b21-b4eb-3cd724bb1a3e
+# ╠═╡ disabled = true
+#=╠═╡
+data = BetaZero.sample_data(solver.data_buffer_valid, 1000)
+  ╠═╡ =#
 
 # ╔═╡ ce006bd6-d691-4efb-b740-4ddc258416c4
 pomdp = solver.pomdp;
@@ -283,6 +315,9 @@ plot_bias_2(predicted, expectation)
 md"""
 # Gaussian process regression
 """
+
+# ╔═╡ fa79f064-81df-476c-a3fb-5271bee3cd5a
+data = BSON.load("data1.bson")[:data];
 
 # ╔═╡ 410bdb7a-a201-47fb-9a92-9910b5b93ca0
 data2 = BSON.load("data2.bson")[:data2];
@@ -447,14 +482,25 @@ gp_plts[2]
 # ╔═╡ 1fa63234-37e4-4b12-a064-6a55b2ee0b67
 gp_plts[3]
 
-# ╔═╡ 9186d51c-dac7-4b21-b4eb-3cd724bb1a3e
-# ╠═╡ disabled = true
-#=╠═╡
-data = BetaZero.sample_data(solver.data_buffer_valid, 1000)
-  ╠═╡ =#
+# ╔═╡ 047c2c69-d662-4dba-b8b6-c25167178ecb
+md"""
+# Plots
+"""
 
-# ╔═╡ fa79f064-81df-476c-a3fb-5271bee3cd5a
-data = BSON.load("data1.bson")[:data];
+# ╔═╡ 743cf6ad-ddaa-403f-8ab8-83513c804134
+ho_μ = [4.236551205969867, 3.652028459679382, 7.7944189894548614, 10.318113003732424, 10.287302809230992, 11.526361419485301, 12.069473152343456, 11.84934767877954, 8.896239195886608, 10.044561362443707, 10.965512347196158, 10.435503538777873, 7.1999703177673124, 7.129402415779563, 10.84189518533771, 10.900835704243512, 11.63269827863645, 12.132977187490116, 11.389794019740489, 12.749711348500671, 10.38277757430994, 10.595804967910901, 13.398598348450202, 12.701389219548489, 9.295595397652649, 11.292780474121894, 11.140712120404325, 10.973793896874584, 13.351930654269845, 12.04749657661156, 12.782538022214517, 10.921692721641527, 12.664604736899955, 11.719984818431652];
+
+# ╔═╡ 7c7b0c5a-ca81-4906-b0a2-ab0c2f1b7782
+ho_σ = [32.52126580543532, 11.409984157920357, 13.594869250610236, 12.28528625779923, 12.521762409373638, 9.89231860480156, 15.343509355635812, 12.533694460944085, 14.233244899468765, 7.131522004805157, 13.408475142519846, 13.667394373029472, 13.064810931241205, 18.11261239946177, 13.86379431526749, 7.8652487728454386, 5.484074355145341, 8.431818002213413, 9.877067852736923, 10.32565045807811, 9.910889011516751, 10.97362461662418, 5.087895762661509, 9.183794792257446, 16.521760832568063, 10.830610073878386, 9.055981842492336, 9.91984691155096, 5.417702137482001, 8.05703332380186, 8.251618277655956, 11.131211067924784, 6.7756796175012, 12.095940437591379];
+
+# ╔═╡ 351d5b4f-4347-441a-88ef-06d54eaf0c16
+n_ho = 100;
+
+# ╔═╡ 058622d9-db81-4a0b-a7a7-dcc5fb765090
+ho_stderr = ho_σ ./ sqrt(n_ho);
+
+# ╔═╡ abb43a1b-2099-4685-81b8-ccb660c3b91e
+plot(ho_μ, ribbon=ho_stderr, fillalpha=0.2, lw=2, label="holdout returns", ylabel="returns", xlabel="iteration", c=:darkgreen)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -466,6 +512,7 @@ Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GaussianProcesses = "891a1506-143c-57d2-908e-e1f8e92e6de9"
 LightDark = "a1c7e911-b2d9-4cdc-ae72-88f9232b4333"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MCTS = "e12ccd36-dcad-5f33-8774-9175229e7b33"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 POMDPModels = "355abbd5-f08e-5560-ac9e-8b5f2592a0ca"
@@ -508,7 +555,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "9f5b629b3d400ea6cbc2e7a023fec1e322578688"
+project_hash = "51c55380100bcfe789ec256eb674cf6894232684"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -2215,6 +2262,7 @@ version = "1.4.1+0"
 # ╠═87c160e9-63f2-4628-b4aa-187e1b85b46d
 # ╠═51afcc23-64d6-4da2-91aa-8fe81d01440b
 # ╠═4408f005-e0bb-4f96-9f7e-38b1d61c7c9b
+# ╠═07aa5bc1-0a89-4de5-aba7-b74265b7bbed
 # ╠═03ff8055-8725-4935-8a09-cb1ea6bf6e35
 # ╠═769e3159-bf5e-4294-b7b9-9e49a32406a1
 # ╠═42b011d7-268b-4c9f-94d9-bbc4981847c1
@@ -2222,7 +2270,12 @@ version = "1.4.1+0"
 # ╠═ae9322da-f369-4f36-9e92-861a1b0f2c4c
 # ╠═ebf5d5bd-6f0e-45ed-af7b-fa06c3140128
 # ╠═c84e0d55-33e3-415e-b108-51efd3a13717
+# ╠═848d0d9c-f036-44a1-8ce4-ba12798cd538
+# ╠═9b4afdca-9c87-4e88-8199-7fa17c2403fe
 # ╠═3bbc44ce-b0b2-4c81-8ec9-d4819bd8ba49
+# ╠═4c81fcc5-b50b-4ecd-a0f4-f3ddfe3fad19
+# ╠═64f10375-ad0b-4640-b117-fe96bf1ea9e1
+# ╠═0feeb06c-3f6d-4ec7-b795-9a1c52fc0e69
 # ╠═4f5e76f2-97d3-418e-a1e5-2fc558fbddcb
 # ╠═7f8ae7e3-8144-4d38-b398-edecf5fc396f
 # ╠═607ed6b8-af59-402a-b9ba-6786bb3f248c
@@ -2266,5 +2319,11 @@ version = "1.4.1+0"
 # ╠═eebb4757-83de-490a-84d5-52f988708c3a
 # ╠═ddbf075e-539e-49a7-8a1b-a8e7b6eb644f
 # ╠═1fa63234-37e4-4b12-a064-6a55b2ee0b67
+# ╟─047c2c69-d662-4dba-b8b6-c25167178ecb
+# ╠═743cf6ad-ddaa-403f-8ab8-83513c804134
+# ╠═7c7b0c5a-ca81-4906-b0a2-ab0c2f1b7782
+# ╠═351d5b4f-4347-441a-88ef-06d54eaf0c16
+# ╠═058622d9-db81-4a0b-a7a7-dcc5fb765090
+# ╠═abb43a1b-2099-4685-81b8-ccb660c3b91e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

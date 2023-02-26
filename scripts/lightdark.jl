@@ -50,15 +50,15 @@ up = LightDark.ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, 500))
 
 
 if false # !Sys.islinux() && false
-    policy.planner.solver.n_iterations = 10_000
+    policy.planner.solver.n_iterations = 10
 
     seed = rand(1:100_000)
     @show seed
-    Random.seed!(seed) # Determinism (9, 11870, 24269) 88801
+    Random.seed!(76941) # Determinism (9, 11870, 24269) 88801 (76941 move to 10, move to goal)
 
     rand_policy = RandomPolicy(pomdp)
     heuristic_policy = HeuristicLightDarkPolicy(; pomdp)
-    policy2use = policy
+    policy2use = policy # <--- Note.
 
     ds0 = initialstate(pomdp)
     b0 = initialize_belief(up, ds0)
@@ -118,11 +118,11 @@ else
                             include_info=false,
                             accuracy_func=lightdark_accuracy_func)
 
-    solver.params.n_iterations = 4
-    solver.params.n_data_gen = 100
+    solver.params.n_iterations = 50
+    solver.params.n_data_gen = 1000
     solver.params.n_evaluate = 0
-    solver.params.n_holdout = 0
-    solver.params.n_buffer = 1
+    solver.params.n_holdout = 100
+    solver.params.n_buffer = 2
     solver.params.use_nn = true # <---- GP or NN surrogate.
 
     solver.use_data_collection_policy = false
@@ -134,8 +134,8 @@ else
     solver.mcts_solver.tree_in_info = true # NOTE: required for policy vector
 
     # Gaussian proccess
-    solver.gp_params.n_samples = 500
-    solver.gp_params.λ_lcb = 0.0
+    solver.gp_params.n_samples = 1000
+    solver.gp_params.use_lcb = false
     solver.gp_params.verbose_plot = true
     solver.gp_params.kernel = BetaZero.Matern(1/2, log(0.45), log(0.1))
 
