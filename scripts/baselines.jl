@@ -115,7 +115,7 @@ for n_iterations in iteration_sweep
     policies = Dict(
         "BetaZero"=>bz_policy,
         # "BetaZero (ensemble)"=>en_policy,
-        # "Random"=>RandomPolicy(pomdp),
+        "Random"=>RandomPolicy(pomdp),
         # "One-Step Lookahead"=>solve_osla(bz_policy.surrogate, pomdp, up, lightdark_belief_reward, bz_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
         # "One-Step Lookahead (ensemble)"=>solve_osla(en_policy.surrogate, pomdp, up, lightdark_belief_reward, en_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
         # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),

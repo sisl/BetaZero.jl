@@ -204,3 +204,48 @@ function plot_accuracy_and_returns(solver::BetaZeroSolver; expert_accuracy=solve
     plt_returns = plot_returns(solver; kwargs..., expert_results=expert_returns, expert_label=solver.expert_results.expert_label)
     return plot(plt_accuracy, plt_returns, layout=2, size=(1000,300), margin=5Plots.mm)
 end
+
+
+"""
+"""
+function plot_data_gen(solver::BetaZeroSolver;
+                       n::Int=10_000, # number of data points to plot
+                       xrange=range(0, 5, length=100),
+                       yrange=range(-20, 20, length=100),
+                       flip_axes::Bool=true,
+                       subplots::Bool=true,
+                       cmap=:viridis,
+                       xlabel="\$\\sigma(b)\$",
+                       ylabel="\$\\mu(b)\$",
+                       title="training data")
+
+    data = sample_data(solver.data_buffer_train, n)
+
+    X1 = flip_axes ? data.X[2,:] : data.X[1,:]
+    X2 = flip_axes ? data.X[1,:] : data.X[2,:]
+    V = data.Y[1,:]
+
+    cmap = shifted_colormap(V)
+    cmap_values = [get(cmap, normalize01(v,V)) for v in V]
+    figure = scatter(X1, X2, label=false, xlabel=xlabel, ylabel=ylabel, title=title, cmap=cmap_values, ms=2, alpha=0.2)
+    xlims!(xrange[1], xrange[end])
+    ylims!(yrange[1], yrange[end])
+
+    current_xlim = xlims()
+    current_ylim = ylims()
+
+    if subplots
+        lay = @layout [a{0.3h} _; b{0.7h, 0.7w} c]
+
+        topfig = Plots.histogram(X1, color=:lightgray, linecolor=:gray, normalize=true, label=nothing, xaxis=nothing)
+        xlims!(current_xlim) # match limits of main plot
+        ylims!(0, ylims()[2]) # anchor at zero
+
+        sidefig = Plots.histogram(X2, color=:lightgray, linecolor=:gray, normalize=true, label=nothing, yaxis=nothing, orientation=:h)
+        xlims!(0, xlims()[2]) # anchor at zero
+        ylims!(current_ylim) # match limits of main plot
+        figure = plot(topfig, figure, sidefig, layout=lay)
+    end
+
+    return figure
+end

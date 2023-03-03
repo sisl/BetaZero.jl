@@ -1,4 +1,6 @@
-Sys.islinux() && include("launch_remote.jl")
+global RUN_PARALLEL = true
+
+RUN_PARALLEL && Sys.islinux() && include("launch_remote.jl")
 using Revise
 using Distributed
 
@@ -40,38 +42,42 @@ if RUN_PARALLEL
 
     solver = BetaZeroSolver(pomdp=pomdp,
                             updater=up,
+                            params=BetaZeroParameters(
+                                n_iterations=20,
+                                n_data_gen=500,
+                                n_evaluate=0,
+                                n_holdout=0,
+                                n_buffer=2
+                            ),
                             belief_reward=lightdark_belief_reward,
                             collect_metrics=true,
                             verbose=true,
+                            plot_incremental_data_gen=true,
                             accuracy_func=lightdark_accuracy_func)
-
-    solver.params.n_iterations = 20
-    solver.params.n_data_gen = 500
-    solver.params.n_evaluate = 0
-    solver.params.n_holdout = 0
 
     # Neural network
     solver.nn_params.n_samples = 1000
     solver.nn_params.verbose_update_frequency = 100
     solver.nn_params.batchsize = 256
 
+    @show solver.params.n_buffer
+
     # Plotting
-    solver.plot_incremental_data_gen = true
-    solver.plot_incremental_holdout = true
     solver.expert_results = (expert_accuracy=[0.84, 0.037], expert_returns=[11.963, 1.617], expert_label="LAVI") # LAVI baseline
 
     # initial_ensemble = BetaZero.initialize_ensemble(solver, 3)
+    # policy = solve(solver, pomdp; surrogate=initial_ensemble)
     policy = solve(solver, pomdp)
     display(value_and_policy_plot(pomdp, policy))
 
-    BetaZero.save_policy(policy, "BetaZero/notebooks/policy_$filename_suffix")
-    BetaZero.save_solver(solver, "BetaZero/notebooks/solver_$filename_suffix")
+    BetaZero.save_policy(policy, "data/policy_$filename_suffix")
+    BetaZero.save_solver(solver, "data/solver_$filename_suffix")
 
     # display(plot_lightdark(pomdp, policy, up)) # Single episode trajectory example
 else
     using BetaZero.MCTS
     using BetaZero.GaussianProcesses
     using BetaZero.DataStructures
-    policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "notebooks", "policy_$filename_suffix.bson"))
-    solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "notebooks", "solver_$filename_suffix.bson"))
+    policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "..", "data", "policy_$filename_suffix.bson"))
+    solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "..", "data", "solver_$filename_suffix.bson"))
 end

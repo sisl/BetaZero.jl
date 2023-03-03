@@ -2,11 +2,11 @@
 Parameters for the BetaZero algorithm.
 """
 @with_kw mutable struct BetaZeroParameters
-    n_iterations::Int = 1 # BetaZero policy iterations (primary outer loop).
-    n_data_gen::Int = 10 # Number of episodes to run for training/validation data generation.
+    n_iterations::Int = 10 # BetaZero policy iterations (primary outer loop).
+    n_data_gen::Int = 100 # Number of episodes to run for training/validation data generation.
     n_evaluate::Int = 0 # Number of episodes to run for surrogate evaluation and comparison.
-    n_holdout::Int = 10 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
-    n_buffer::Int = n_iterations # Number of iterations to keep data for surrogate training (NOTE: each simulation has multiple time steps of data, not counted in this number. This number corresponds to the number of iterations, i.e., set to 2 if you want to keep data from the previous 2 policy iterations.)
+    n_holdout::Int = 0 # Number of episodes to run for a holdout test set (on a fixed, non-training or evaluation set).
+    n_buffer::Int = 2 # Number of iterations to keep data for surrogate training (NOTE: each simulation has multiple time steps of data, not counted in this number. This number corresponds to the number of iterations, i.e., set to 2 if you want to keep data from the previous 2 policy iterations.)
     λ_ucb::Real = 0.0 # Upper confidence bound parameter: μ + λσ # TODO: Remove?
     use_nn::Bool = true # Use neural network as the surrogate model
 end

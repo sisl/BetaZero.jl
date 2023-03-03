@@ -43,6 +43,7 @@ export
     plot_accuracy,
     plot_returns,
     plot_accuracy_and_returns,
+    plot_data_gen,
     bettersavefig
 
 
