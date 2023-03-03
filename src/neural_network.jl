@@ -324,7 +324,7 @@ end
 Evaluate the neural network `f` using the `belief` as input, return the predicted value.
 Note, inference is done on the CPU given a single input.
 """
-function value_lookup(belief, f::Union{Chain,EnsambleNetwork})
+function value_lookup(belief, f::Union{Chain,EnsembleNetwork})
     b = Float32.(input_representation(belief))
     x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
     y = f(x) # evaluate network `f`
@@ -338,7 +338,7 @@ end
 Evaluate the neural network `f` using the `belief` as input, return the predicted policy vector.
 Note, inference is done on the CPU given a single input.
 """
-function policy_lookup(belief, f::Union{Chain,EnsambleNetwork})
+function policy_lookup(belief, f::Union{Chain,EnsembleNetwork})
     b = Float32.(input_representation(belief))
     x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
     y = f(x) # evaluate network `f`
@@ -350,7 +350,7 @@ end
 """
 Use predicted policy vector to sample next action.
 """
-function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,EnsambleNetwork})
+function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,EnsembleNetwork})
     p = policy_lookup(belief, f)
     as = POMDPs.actions(problem) # TODO: actions(problem, belief) ??
     return rand(SparseCat(as, p))

@@ -162,7 +162,7 @@ policy = BetaZero.load_policy("policy_lightdark_pluto_nn_cleanup.bson");
 # policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions_20iters.bson");
 
 # ╔═╡ 3af7e1d4-5664-4e71-a075-5695e649bbfa
-en = BetaZero.BSON.load("ensamble_m5_weekend_50iters_include_missing.bson")[:en];
+en = BetaZero.BSON.load("ensemble_m5_weekend_50iters_include_missing.bson")[:en];
 
 # ╔═╡ 243f9939-0d54-457d-be7d-6f0648f4fa63
 begin
@@ -311,10 +311,10 @@ begin
 end;
 
 # ╔═╡ 56e2593e-cdf0-4cde-830c-09af3daa7e17
-heatmap(Σ, M, Yen_data, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble μ m=5)", cmap=shifted_colormap(Yen_data))
+heatmap(Σ, M, Yen_data, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensemble μ m=5)", cmap=shifted_colormap(Yen_data))
 
 # ╔═╡ 8689d008-0a28-45c1-b35c-0f17c990cb5c
-heatmap(Σ, M, Yen_σ_data, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble σ m=5)", cmap=:jet)
+heatmap(Σ, M, Yen_σ_data, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensemble σ m=5)", cmap=:jet)
 
 # ╔═╡ 30e52cf5-37d4-4b85-908c-43990d6592bd
 Yπ_en_uncertain_μ = (y,x)->begin
@@ -334,10 +334,10 @@ end
 Yen_μ_data_uncertain = [Yπ_en_uncertain_μ(x,y) for y in M, x in Σ];
 
 # ╔═╡ 5565d9e9-bb35-4bb0-91ad-73662e9d6136
-heatmap(Σ, M, Yen_μ_data_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble μ m=5)", cmap=shifted_colormap(Yen_μ_data_uncertain))
+heatmap(Σ, M, Yen_μ_data_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensemble μ m=5)", cmap=shifted_colormap(Yen_μ_data_uncertain))
 
 # ╔═╡ 4e8af1b8-7b5f-442d-b28b-0b8d7bdf1a7d
-heatmap(Σ, M, Yen_data_lcb, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble LCB m=5)", cmap=shifted_colormap(Yen_data_lcb))
+heatmap(Σ, M, Yen_data_lcb, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensemble LCB m=5)", cmap=shifted_colormap(Yen_data_lcb))
 
 # ╔═╡ ec606b95-cb6c-4a54-8e1d-d1a1881457d9
 begin
@@ -345,7 +345,7 @@ begin
 end;
 
 # ╔═╡ d75b9ea2-6a15-4e2d-ab78-0eb16ea54b11
-heatmap(Σ, M, Yen_π_σ, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (ensamble μ m=5)", cmap=palette(:viridis, 3))
+heatmap(Σ, M, Yen_π_σ, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (ensemble μ m=5)", cmap=palette(:viridis, 3))
 
 # ╔═╡ c6aa050f-646e-4033-98ef-426c774b2bc9
 Yπ_en_uncertain = (y,x)->begin
@@ -362,7 +362,7 @@ Yπ_en_uncertain = (y,x)->begin
 end
 
 # ╔═╡ c59a36ee-11e6-420c-9c27-16cbe23cd6e6
-heatmap(Σ, M, Yπ_en_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (ensamble μ m=5)", cmap=cgrad([:white, :darkblue, :green, :gold], categorical=true)) # palette(:viridis, 3))
+heatmap(Σ, M, Yπ_en_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (ensemble μ m=5)", cmap=cgrad([:white, :darkblue, :green, :gold], categorical=true)) # palette(:viridis, 3))
 
 # ╔═╡ 157e9d3c-3a4d-4426-86f3-1d731a8da122
 begin
@@ -1082,7 +1082,12 @@ md"""
 """
 
 # ╔═╡ 0f8578cd-37f5-4ecd-b9eb-6a6351750fa9
-plot([1], [1], marker=false)
+begin
+	p1 = plot([1], [1], marker=false)
+	p2 = plot([1], [1], marker=false)
+	p3 = plot([1], [1], marker=false)
+	plot(p1, p2, p3, layout=@layout[a{0.5w} b{0.5w}; _ _ _ c{0.5w} _ _ _ _])
+end
 
 # ╔═╡ 743cf6ad-ddaa-403f-8ab8-83513c804134
 ho_μ = [m.mean for m in solver.holdout_metrics];

@@ -38,9 +38,12 @@ export
     value_plot,
     policy_plot,
     value_and_policy_plot,
+    value_policy_uncertainty_plot,
+    uncertainty_plot,
     plot_accuracy,
     plot_returns,
-    plot_accuracy_and_returns
+    plot_accuracy_and_returns,
+    bettersavefig
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
@@ -89,11 +92,11 @@ end
 include("utils.jl")
 include("metrics.jl")
 include("gaussian_process.jl")
-include("ensamble.jl")
+include("ensemble.jl")
 include("neural_network.jl")
 
 
-const Surrogate = Union{Chain, GPSurrogate, EnsambleNetwork} # Needs GPSurrogate and EnsambleNetwork defined.
+const Surrogate = Union{Chain, GPSurrogate, EnsembleNetwork} # Needs GPSurrogate and EnsembleNetwork defined.
 
 mutable struct BetaZeroPolicy <: POMDPs.Policy
     surrogate::Surrogate

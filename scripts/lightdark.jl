@@ -47,7 +47,7 @@ if RUN_PARALLEL
 
     solver.params.n_iterations = 20
     solver.params.n_data_gen = 500
-    solver.params.n_evaluate = 50
+    solver.params.n_evaluate = 0
     solver.params.n_holdout = 0
 
     # Neural network
@@ -60,6 +60,7 @@ if RUN_PARALLEL
     solver.plot_incremental_holdout = true
     solver.expert_results = (expert_accuracy=[0.84, 0.037], expert_returns=[11.963, 1.617], expert_label="LAVI") # LAVI baseline
 
+    # initial_ensemble = BetaZero.initialize_ensemble(solver, 3)
     policy = solve(solver, pomdp)
     display(value_and_policy_plot(pomdp, policy))
 

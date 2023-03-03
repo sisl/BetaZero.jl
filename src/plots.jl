@@ -62,6 +62,61 @@ value_and_policy_plot(pomdp::POMDP, policy::BetaZeroPolicy; kwargs...) = plot(va
 
 
 """
+Plot combined value, policy, and uncertainty plots.
+"""
+function value_policy_uncertainty_plot(pomdp::POMDP, policy::BetaZeroPolicy; kwargs...)
+    plt_value = value_plot(policy; kwargs...)
+    plt_policy = policy_plot(pomdp, policy; kwargs...)
+    plt_value_uncertainty = uncertainty_plot(policy; is_value=true, kwargs...)
+    plt_policy_uncertainty = uncertainty_plot(policy; is_value=false, kwargs...)
+    return plot(plt_value, plt_policy, plt_value_uncertainty, plt_policy_uncertainty, layout=4, size=(1000,600), margin=5Plots.mm)
+end
+
+
+"""
+Plot uncertainty from ensemble surrogate of the value or policy function (when applicable for scalar μ and σ)
+"""
+function uncertainty_plot(policy::BetaZeroPolicy;
+                          is_value::Bool=true, # value or policy uncertainty plots
+                          xrange=range(0, 5, length=100),
+                          yrange=range(-20, 20, length=100),
+                          flip_axes::Bool=true,
+                          cmap=:viridis,
+                          xlabel="\$\\sigma(b)\$",
+                          ylabel="\$\\mu(b)\$",
+                          title="$(is_value ? "value" : "policy") (uncertainty)")
+
+    if !isa(policy.surrogate, EnsembleNetwork)
+        error("Cannot plot uncertainty using the surrogate $(typeof(policy.surrogate))")
+    end
+
+    if is_value
+        Y = (x,y)->policy.surrogate(Float32.([x y])', return_std=true)[2][1]
+    else
+        Y = (x,y)->begin
+            μ, σ = policy.surrogate(Float32.([x y])', return_std=true)
+            μp, pσ = μ[2:end], σ[2:end]
+            # Use σ from selected action
+            return pσ[argmax(μp)]
+        end
+        # Y = (x,y)->sum(policy.surrogate(Float32.([x y])', return_std=true)[2][2:end]) # use sum of σ across actions
+    end
+
+    if flip_axes
+        # mean on the y-axis, std on the x-axis
+        Ydata = [Y(y,x) for y in yrange, x in xrange] # Note x-y input flip
+    else
+        # mean on the x-axis, std on the y-axis
+        xlabel, ylabel = ylabel, xlabel
+        xrange, yrange = yrange, xrange
+        Ydata = [Y(x,y) for y in yrange, x in xrange]
+    end
+
+    return Plots.heatmap(xrange, yrange, Ydata, xlabel=xlabel, ylabel=ylabel, title=title, cmap=cmap)
+end
+
+
+"""
 Plot holdout and performance metrics over iterations (core for `plot_accuracy` and `plot_returns`).
 """
 function plot_metric(solver::BetaZeroSolver;

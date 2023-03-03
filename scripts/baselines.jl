@@ -19,7 +19,7 @@ end
         using BetaZero.DataStructures
         policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "notebooks", "policy_lightdark_64relu.bson"))
         solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "notebooks", "solver_lightdark_64relu.bson"))
-        en = BetaZero.BSON.load(joinpath(@__DIR__, "..", "notebooks", "ensamble_m5_weekend_50iters_include_missing.bson"))[:en]
+        en = BetaZero.BSON.load(joinpath(@__DIR__, "..", "notebooks", "ensemble_m5_weekend_50iters_include_missing.bson"))[:en]
     end
 
     function solve_osla(f, pomdp, up, belief_reward, next_action=nothing; n_actions=10, n_obs=10)
@@ -114,10 +114,10 @@ for n_iterations in iteration_sweep
 
     policies = Dict(
         "BetaZero"=>bz_policy,
-        # "BetaZero (ensamble)"=>en_policy,
+        # "BetaZero (ensemble)"=>en_policy,
         # "Random"=>RandomPolicy(pomdp),
         # "One-Step Lookahead"=>solve_osla(bz_policy.surrogate, pomdp, up, lightdark_belief_reward, bz_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
-        # "One-Step Lookahead (ensamble)"=>solve_osla(en_policy.surrogate, pomdp, up, lightdark_belief_reward, en_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
+        # "One-Step Lookahead (ensemble)"=>solve_osla(en_policy.surrogate, pomdp, up, lightdark_belief_reward, en_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
         # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
         # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
         "POMCPOW"=>solve(convert_to_pomcow(bz_solver, 100*bz_solver.mcts_solver.n_iterations), pomdp),
