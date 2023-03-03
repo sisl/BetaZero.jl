@@ -24,7 +24,7 @@ function convert2data(b::MEBelief)
 end
 
 
-function BetaZero.input_representation(b::MEBelief; use_higher_orders::Bool=true)
+function BetaZero.input_representation(b::MEBelief; use_higher_orders::Bool=false)
     D = convert2data(b)
     μ = mean(D[:,:,1:end-1], dims=3)[:,:,1]
     σ² = std(D[:,:,1:end-1], dims=3)[:,:,1]

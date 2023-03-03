@@ -2,11 +2,13 @@ module BetaZero
 
 using BSON
 using DataStructures
+using Distributions
 using Distributed
 using Flux
 using GaussianProcesses
 using LinearAlgebra
 using MCTS
+using Optim
 using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 using Parameters
 using POMDPs
@@ -31,14 +33,21 @@ export
     BetaZeroNetworkParameters,
     BetaZeroGPParameters,
     BeliefMDP,
-    OneStepLookaheadSolver
+    OneStepLookaheadSolver,
+    RawNetworkPolicy,
+    value_plot,
+    policy_plot,
+    value_and_policy_plot,
+    plot_accuracy,
+    plot_returns,
+    plot_accuracy_and_returns
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
     pomdp::POMDP
     updater::POMDPs.Updater
     params::BetaZeroParameters = BetaZeroParameters() # parameters for BetaZero algorithm
-    nn_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters(input_size=get_input_size(pomdp,updater)) # parameters for training NN
+    nn_params::BetaZeroNetworkParameters = BetaZeroNetworkParameters(input_size=get_input_size(pomdp,updater), action_size=length(actions(pomdp))) # parameters for training NN
     gp_params::BetaZeroGPParameters = BetaZeroGPParameters(input_size=get_input_size(pomdp,updater)) # parameters for training GP
     data_buffer_train::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for training (NOTE: each simulation has multiple time steps of data)
     data_buffer_valid::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for validation (NOTE: making sure to clearly separate training from validation to prevent data leakage)
@@ -46,22 +55,25 @@ export
     belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0 # reward function: R(b,a,b′)
     # TODO: belief_representation::Function (see `representation.jl` TODO: should it be a parameter or overloaded function?)
     include_info::Bool = false # Include `action_info` in metrics when running POMDP simulation
-    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=10,
+    mcts_solver::AbstractMCTSSolver = DPWSolver(n_iterations=1000,
                                                 check_repeat_action=true,
-                                                exploration_constant=1.0, # 1.0
-                                                k_action=2.0, # 10
-                                                alpha_action=0.25, # 0.5
-                                                k_state=2.0, # 10
-                                                alpha_state=0.1, # 0.5
-                                                tree_in_info=false,
+                                                exploration_constant=1.0,
+                                                k_action=2.0,
+                                                alpha_action=0.25,
+                                                k_state=2.0,
+                                                alpha_state=0.1,
+                                                tree_in_info=true, # Note, required for policy vector.
                                                 show_progress=false,
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a surrogate lookup
     data_collection_policy::Policy = RandomPolicy(Random.GLOBAL_RNG, pomdp, updater) # Policy used for data collection (if indicated to use different policy than the BetaZero on-policy)
     use_data_collection_policy::Bool = false # Use provided policy for data collection.
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
-    performance_metrics::Array = [] # TODO: store_metrics for NON-HOLDOUT runs.
+    performance_metrics::Array = [] # Stored metrics for data generation runs.
     holdout_metrics::Array = [] # Metrics computed from holdout test set.
     accuracy_func::Function = (pomdp,belief,state,action,returns)->nothing # (returns Bool): Function to indicate that the decision was "correct" (if applicable)
+    plot_incremental_data_gen::Bool = false # Plot accuracies and returns over iterations after data collection
+    plot_incremental_holdout::Bool = false # Plot accuracies and returns over iterations after running holdout test
+    expert_results::NamedTuple{(:expert_accuracy, :expert_returns, :expert_label), Tuple{Union{Nothing,Vector}, Union{Nothing,Vector}, String}} = (expert_accuracy=nothing, expert_returns=nothing, expert_label="expert") # For plotting comparisons, pass in the [mean, std] for the expert metrics.
     verbose::Bool = true # Print out debugging/training/simulation information during solving
 end
 
@@ -76,11 +88,12 @@ end
 # Needs BetaZeroSolver defined.
 include("utils.jl")
 include("metrics.jl")
-include("gaussian_proccess.jl")
+include("gaussian_process.jl")
+include("ensamble.jl")
 include("neural_network.jl")
 
 
-const Surrogate = Union{Chain, GPSurrogate} # Needs GPSurrogate defined.
+const Surrogate = Union{Chain, GPSurrogate, EnsambleNetwork} # Needs GPSurrogate and EnsambleNetwork defined.
 
 mutable struct BetaZeroPolicy <: POMDPs.Policy
     surrogate::Surrogate
@@ -89,13 +102,15 @@ mutable struct BetaZeroPolicy <: POMDPs.Policy
 end
 
 
+include("raw_network.jl") # Needs Surrogate defined.
 include("saving.jl") # Needs BetaZeroSolver and BetaZeroPolicy defined.
+include("plots.jl")
 
 
 """
 The main BetaZero policy iteration algorithm.
 """
-function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate=solver.params.use_nn ? initialize_network(solver) : initialize_gaussian_proccess(solver))
+function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate=solver.params.use_nn ? initialize_network(solver) : initialize_gaussian_process(solver))
     fill_bmdp!(pomdp, solver)
     f_prev::Surrogate = deepcopy(surrogate)
 
@@ -106,8 +121,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate
         run_holdout_test!(pomdp, solver, f_prev)
 
         # 1) Generate data using the best BetaZero agent so far: {[belief, return], ...}
-        # use_different_policy = (i == 1) ? solver.use_data_collection_policy : false # only use data collection policy on first iteration
-        use_different_policy = solver.use_data_collection_policy
+        use_different_policy = (i == 1) ? solver.use_data_collection_policy : false # only use data collection policy on first iteration
         generate_data!(pomdp, solver, f_prev; store_metrics=solver.collect_metrics, use_different_policy=use_different_policy, inner_iter=solver.params.n_data_gen, outer_iter=i)
 
         # 2) Optimize surrogate with recent simulated data (to estimate value given belief).
@@ -152,6 +166,14 @@ function attach_surrogate!(solver::BetaZeroSolver, f::Surrogate)
     solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(b, f)
     solver.mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f)
     return solver
+end
+
+function attach_surrogate!(policy::BetaZeroPolicy, f::Surrogate)
+    policy.surrogate = f
+    policy.planner.solver.estimate_value = (bmdp,b,d)->value_lookup(b, f)
+    policy.planner.solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f)
+    policy.planner = solve(policy.planner.solver, policy.planner.mdp) # Important for online policy
+    return policy
 end
 
 
@@ -293,7 +315,10 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     if solver.verbose
         μ, σ = mean_and_std(G)
         n_returns = length(G)
-        @info "Generated data return statistics: $(round(μ, digits=3)) ± $(round(σ/sqrt(n_returns), digits=3))"
+        accuracies = [m.accuracy for m in metrics]
+        μ_acc, σ_acc = mean_and_std(accuracies)
+        n_accs = length(accuracies)
+        @info "Generated data return statistics: $(round(μ, digits=3)) ± $(round(σ/sqrt(n_returns), digits=3)) returns, $(round(μ_acc, digits=3)) ± $(round(σ_acc/sqrt(n_accs), digits=3)) accuracy"
     end
 
     # Much faster than `cat(belief...; dims=4)`
@@ -323,13 +348,18 @@ function generate_data!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         perm_valid = perm[n_train+1:n_data]
         x_size_span = map(d->1:d, solver.nn_params.input_size) # e.g., (1:30, 1:30, 1:5)
         X_train = getindex(data.X, x_size_span..., perm_train) # general for any size matrix e.g., x_train = x_data[:,:,:,perm_train]
-        Y_train = data.Y[:, perm_train] # always assumed to be 1xN (TODO: Changes when dealing with policy vector)
+        Y_train = data.Y[:, perm_train] # always assumed to be 1xN
         data_train = (X=X_train, Y=Y_train)
         push!(solver.data_buffer_train, data_train)
         X_valid = getindex(data.X, x_size_span..., perm_valid)
-        Y_valid = data.Y[:, perm_valid] # TODO: Changes when dealing with policy vector
+        Y_valid = data.Y[:, perm_valid]
         data_valid = (X=X_valid, Y=Y_valid)
         push!(solver.data_buffer_valid, data_valid)
+
+        # Plot incremental learning
+        if solver.plot_incremental_data_gen
+            plot_accuracy_and_returns(solver; include_holdout=solver.plot_incremental_holdout) |> display
+        end
     end
 
     return return_metrics ? (data, metrics) :  data
@@ -353,7 +383,7 @@ end
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
 """
 function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0, s0;
-                        max_steps=200, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, include_info::Bool=false)
+                        max_steps=100, collect_metrics::Bool=false, accuracy_func::Function=(args...)->nothing, include_info::Bool=false)
     rewards::Vector{Float64} = [0.0]
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     local action
@@ -386,7 +416,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             P = zeros(length(action_space))
             # Fill out entire policy vector for every action (if it wasn't seen in the tree, then p=0)
             for (i,a′) in enumerate(action_space)
-                j = findfirst(tree_A .== a′)
+                j = findfirst(tree_a->tree_a == a′, tree_A)
                 if !isnothing(j)
                     P[i] = tree_P[j]
                 end
@@ -453,6 +483,10 @@ function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate; o
         μ, σ = mean_and_std(returns)
         push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns, accuracies=accuracies, num_actions=num_actions))
         solver.verbose && @show μ, σ
+
+        if solver.plot_incremental_holdout
+            plot_accuracy_and_returns(solver; include_holdout=true) |> display
+        end
     end
 end
 

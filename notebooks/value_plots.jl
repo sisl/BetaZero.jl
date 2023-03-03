@@ -33,7 +33,10 @@ begin
 	using DataStructures
 	using GaussianProcesses
 	using LinearAlgebra
-    using Pkg	
+	using GridInterpolations
+	using LocalApproximationValueIteration
+	using LocalFunctionApproximation
+    using Pkg
 end
 
 # ╔═╡ 75017254-95fe-4958-a3d2-1ea0b9b8f0a2
@@ -51,8 +54,17 @@ end
 # ╔═╡ 5a5c8125-d8ed-4664-b5a2-a20819a81920
 using PlutoUI
 
+# ╔═╡ 2a06238b-06ca-453d-a797-162f183cd869
+using Images
+
 # ╔═╡ bda2e95f-b22f-4ba1-95ba-f973669e31d9
 using BSON
+
+# ╔═╡ f2e9c419-d2ca-4bc8-8f94-2115f192decf
+using Interpolations
+
+# ╔═╡ 0255a5cc-7a77-42dd-b86e-b9e1d2c88079
+using Optim
 
 # ╔═╡ 40b78b0d-ddd0-4880-92ba-6bb6c5cb1668
 HTML("""
@@ -114,6 +126,9 @@ begin
 	Core.eval(Main, :(using LinearAlgebra))
 	Core.eval(Main, :(using GaussianProcesses))
 	Core.eval(Main, :(using GaussianProcesses.PDMats))
+	Core.eval(Main, :(using GridInterpolations))
+	Core.eval(Main, :(using LocalApproximationValueIteration))
+	Core.eval(Main, :(using LocalFunctionApproximation))
 end
 
 # ╔═╡ c0f29e13-bdce-4908-9e9a-6001c88e5ed9
@@ -121,11 +136,19 @@ end
 # policy = BetaZero.load_policy("policy_lightdark_pluto_nn_do0.75.bson");
 # policy = BetaZero.load_policy("policy_lightdark_pluto_nn_reginputs.bson");
 # policy = BetaZero.load_policy("policy_lightdark_pluto_nn_2buffer_5000epochs.bson");
-policy = BetaZero.load_policy("policy_lightdark_pluto_nn_lavi.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_lavi_nice_Psa.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_lavi_weekend.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_weekend_50iters_include_missing.bson");
+# policy = BetaZero.load_policy("policy_lightdark_pluto_nn_weekend_20iters_mse_lr0.001.bson");
+policy = BetaZero.load_policy("policy_lightdark_pluto_nn_cleanup.bson");
 
 # ╔═╡ 1bb8df23-575a-479b-a4ce-3ceb3eb7acbf
 # solver = BetaZero.load_solver("solver_lightdark_pluto_nn.bson");
 # solver = BetaZero.load_solver("solver_lightdark_pluto_gp_1iter.bson");
+# solver = BetaZero.load_solver("solver_lightdark_pluto_nn_weekend_50iters_include_missing.bson");
+
+# ╔═╡ 8c7e2291-b846-4659-a3bd-f6abacdd3130
+# policy64 = BetaZero.load_policy("policy__lightdark_pluto_nn_thursday_64relu.bson");
 
 # ╔═╡ 6309e3f0-29c9-4963-a2d1-f6fcb5f3ada4
 # policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_1iter.bson");
@@ -133,10 +156,23 @@ policy = BetaZero.load_policy("policy_lightdark_pluto_nn_lavi.bson");
 # policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_2buffer_10ll.bson")
 # policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_2buffer.bson")
 # policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_musig.bson")
-policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_lavi.bson")
+# policy_gp = BetaZero.load_policy("policy_lightdark_pluto_gp_lavi.bson");
 
 # ╔═╡ 80c2be9e-a242-4e9d-a082-8c61cfe5ae74
-policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions_20iters.bson");
+# policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions_20iters.bson");
+
+# ╔═╡ 3af7e1d4-5664-4e71-a075-5695e649bbfa
+en = BetaZero.BSON.load("ensamble_m5_weekend_50iters_include_missing.bson")[:en];
+
+# ╔═╡ 243f9939-0d54-457d-be7d-6f0648f4fa63
+begin
+	lavi_policy = BSON.load(joinpath(@__DIR__, "..", "policy_lavi.bson"))[:policy]
+end
+
+# ╔═╡ db354fe2-6fe4-4593-8c8b-9c6bbf6f05e7
+md"""
+# 1D value plots
+"""
 
 # ╔═╡ fb09d547-377a-4e34-9e5f-87d06a8c12e2
 @bind stdev Slider(0:0.1:10, default=0, show_value=true)
@@ -152,12 +188,18 @@ policy_gp_a = BetaZero.load_policy("policy_lightdark_pluto_gp_actions_20iters.bs
 
 # ╔═╡ 4408f005-e0bb-4f96-9f7e-38b1d61c7c9b
 begin
+	# NOTE: value_plot_1d
 	vp_nn = BetaZero.value_plot(policy; σ=stdev, s=skew, k=kurt, o=obs)
 	title!("NN")
 	vp_gp = BetaZero.value_plot(policy_gp; σ=stdev, s=skew, k=kurt, o=obs)
 	title!("GP")
 	plot(vp_nn, vp_gp, layout=[1 1], size=(700,250), margin=2Plots.mm)
 end
+
+# ╔═╡ 90c4edd0-0215-47df-ba5b-c645576a69f2
+md"""
+# 2D value & policy plots
+"""
 
 # ╔═╡ 07aa5bc1-0a89-4de5-aba7-b74265b7bbed
 as = [-1, 0, 1]
@@ -174,9 +216,27 @@ begin
 	Ydata = [Y(x,y) for y in M, x in Σ]
 end;
 
+# ╔═╡ 42de9867-be47-44f4-80ec-15a066a45b8c
+# TODO: Fix confusing (x,y) (y,x) business
+
+# ╔═╡ 1208652f-3ab9-4379-b0ba-b80f29977b3c
+begin
+	Σ_small = 0:0.5:5
+	M_small = -20:1:20
+end;
+
+# ╔═╡ ac5456ea-4211-480f-90c8-b50b4a28d0b9
+M_small30 = -30:1:30;
+
 # ╔═╡ 769e3159-bf5e-4294-b7b9-9e49a32406a1
 # NOTE x-y flip.
 Y_gp = (y,x)->policy_gp.surrogate(Float64.([x y])')[1]
+
+# ╔═╡ eb6537de-b4d2-49bd-9a20-529240fa4e98
+
+
+# ╔═╡ f105a961-d94e-4c3d-b1d2-6dd077922dc7
+exp(0.9162907318741551)^2
 
 # ╔═╡ 812bd7a7-70af-4581-9170-8ce8af05bd14
 function shifted_colormap(X; kwargs...)
@@ -186,7 +246,12 @@ end
 
 # ╔═╡ ae9322da-f369-4f36-9e92-861a1b0f2c4c
 function shifted_colormap(xmin, xmax; colors=[:red, :white, :green], rev=false)
-	buckets = [xmin, xmin/2, 0, xmax/2, xmax] # shift colormap so 0 is at center
+	if xmin ≥ 0
+		buckets = [0, xmin, xmin/2, xmax/2, xmax] # only non-negatives, anchor at 0
+		colors = colors[2:end]
+	else
+		buckets = [xmin, xmin/2, 0, xmax/2, xmax] # shift colormap so 0 is at center
+	end
     normed = (buckets .- xmin) / (xmax - xmin)
     return cgrad(colors, normed, rev=rev)
 end
@@ -205,19 +270,263 @@ function normalize_range(X, a, b)
 end
 
 # ╔═╡ 9b4afdca-9c87-4e88-8199-7fa17c2403fe
-Ydata′ = clamp.(Ydata, -100, 100); # normalize_range(Ydata, -100, 100);
+begin
+	# Ydata′ = Ydata; # clamp.(Ydata, -100, 100); # normalize_range(Ydata, -100, 100);
+	Y_flip = (x,y)->policy.surrogate(Float32.([x y])')[1]
+	# Ydata′ = deepcopy(Ydata)
+	Ydata′ = [Y_flip(y,x) for y in M, x in Σ] # NOTE: trea
+	# Ydata′[Ydata′ .< -100] .= 0
+	# Ydata′[Ydata′ .> 100] .= 0
+end;
+
+# ╔═╡ 029202f4-ba86-457a-911e-30f02ef99f47
+policy.surrogate(Float32.([10 3])')
+
+# ╔═╡ 547c9e31-6372-4625-b1a7-212adb2e5438
+[2 0]'
+
+# ╔═╡ c6c3bcb9-ecd0-494b-9fa5-11c35c722396
+md"""
+## Neural network
+"""
 
 # ╔═╡ 3bbc44ce-b0b2-4c81-8ec9-d4819bd8ba49
 heatmap(Σ, M, Ydata′, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (NN)", cmap=shifted_colormap(Ydata′))
 
+# ╔═╡ bd73ffa0-3a73-4922-b7a8-3ffc62f8da25
+begin
+	Yen_μ = (y,x)->en(Float32.([x y])')[1][1]
+	Yen_data = [Yen_μ(x,y) for y in M, x in Σ]
+end;
+
+# ╔═╡ ee234170-f86b-4b03-9256-7cbdc644d74a
+begin
+	Yen_σ = (y,x)->en(Float32.([x y])')[2][1]
+	Yen_σ_data = [Yen_σ(x,y) for y in M, x in Σ]
+end;
+
+# ╔═╡ 1f52fb7c-56e2-4fc4-9c00-b35b523ac51f
+begin
+	Yen_data_lcb = Yen_data .- 1.0 * Yen_σ_data
+end;
+
+# ╔═╡ 56e2593e-cdf0-4cde-830c-09af3daa7e17
+heatmap(Σ, M, Yen_data, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble μ m=5)", cmap=shifted_colormap(Yen_data))
+
+# ╔═╡ 8689d008-0a28-45c1-b35c-0f17c990cb5c
+heatmap(Σ, M, Yen_σ_data, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble σ m=5)", cmap=:jet)
+
+# ╔═╡ 30e52cf5-37d4-4b85-908c-43990d6592bd
+Yπ_en_uncertain_μ = (y,x)->begin
+	Y = en(Float32.([x y])')
+	Vμ = Y[1][1]
+	Vσ = Y[2][1]
+	Pμ = Y[1][2:end]
+	if Vσ > 100
+	# if Vσ > Vμ
+		return 0
+	else
+		return Vμ
+	end
+end
+
+# ╔═╡ be289f06-ea10-43d8-9c03-0a14aa1579a4
+Yen_μ_data_uncertain = [Yπ_en_uncertain_μ(x,y) for y in M, x in Σ];
+
+# ╔═╡ 5565d9e9-bb35-4bb0-91ad-73662e9d6136
+heatmap(Σ, M, Yen_μ_data_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble μ m=5)", cmap=shifted_colormap(Yen_μ_data_uncertain))
+
+# ╔═╡ 4e8af1b8-7b5f-442d-b28b-0b8d7bdf1a7d
+heatmap(Σ, M, Yen_data_lcb, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (ensamble LCB m=5)", cmap=shifted_colormap(Yen_data_lcb))
+
+# ╔═╡ ec606b95-cb6c-4a54-8e1d-d1a1881457d9
+begin
+	Yen_π_σ = (y,x)->as[argmax(en(Float32.([x y])')[1][2:end])]
+end;
+
+# ╔═╡ d75b9ea2-6a15-4e2d-ab78-0eb16ea54b11
+heatmap(Σ, M, Yen_π_σ, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (ensamble μ m=5)", cmap=palette(:viridis, 3))
+
+# ╔═╡ c6aa050f-646e-4033-98ef-426c774b2bc9
+Yπ_en_uncertain = (y,x)->begin
+	Y = en(Float32.([x y])')
+	Vμ = Y[1][1]
+	Vσ = Y[2][1]
+	Pμ = Y[1][2:end]
+	if Vσ > 100
+	# if Vσ > Vμ
+		return -2
+	else
+		return as[argmax(Pμ)]
+	end
+end
+
+# ╔═╡ c59a36ee-11e6-420c-9c27-16cbe23cd6e6
+heatmap(Σ, M, Yπ_en_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (ensamble μ m=5)", cmap=cgrad([:white, :darkblue, :green, :gold], categorical=true)) # palette(:viridis, 3))
+
+# ╔═╡ 157e9d3c-3a4d-4426-86f3-1d731a8da122
+begin
+	# __μ = 0
+	__σ = 2.0
+end;
+
+# ╔═╡ fd432cf8-1e7e-475b-9c41-46d18ffe2335
+@bind __μ Slider(-10:1:10, show_value=true, default=0)
+
+# ╔═╡ 3b2cffc2-1f52-453e-a244-a3603c829564
+Yμ, Yσ = en(Float32.([__μ __σ])')
+
+# ╔═╡ 007c03ca-8a6e-414f-89bd-7fa29fdbf540
+en(Float32.([__μ __σ])'; use_lcb=true)
+
+# ╔═╡ 3aae1c42-4092-425f-8086-cbe0518a2692
+Plcb = softmax(Yμ[2:end] - 1.0*Yσ[2:end]); # policy LCB
+
+# ╔═╡ 1af2cbfe-4ccf-4b4e-a253-ab6b63d037f1
+as[argmax(Plcb)], as[argmax(Yμ[2:end])]
+
+# ╔═╡ 609d9262-10b9-4e9e-9bda-5ad50338ac62
+SparseCat(reverse(as), reverse(Plcb)) # LCB P(b,a)
+
+# ╔═╡ 8ab1e3f5-710c-4ecf-9cc8-c1e2d914a011
+SparseCat(reverse(as), reverse(Yμ[2:end])) # MEAN P(b,a)
+
+# ╔═╡ ac56db3d-ea72-459e-a072-920edd03cb67
+SparseCat(reverse(as), reverse(Yσ[2:end])) # UNCERTAINTY on P(b,a)
+
+# ╔═╡ 40b599eb-e068-4faf-b54e-6dca4896d4a2
+Yμ[1] - 1.0*Yσ[1]
+
 # ╔═╡ 4c81fcc5-b50b-4ecd-a0f4-f3ddfe3fad19
-SparseCat(reverse(as), reverse(policy.surrogate(Float32.([0 0])')[2:end]))
+SparseCat(reverse(as), reverse(policy.surrogate(Float32.([__μ __σ])')[2:end]))
+
+# ╔═╡ 1515aa19-f8b5-4d26-93a8-3afd3e144ad1
+maximum(policy.surrogate(Float32.([-10 0])')[2:end]) ≈ 1
+
+# ╔═╡ 70b0c991-ca46-4434-ac21-4f7785755cb4
+Yπ_uncertain = (y,x)->begin
+	P = policy.surrogate(Float32.([x y])')[2:end]
+	if maximum(P) ≈ 1
+		return -2
+	else
+		return as[argmax(P)]
+	end
+end
+
+# ╔═╡ 828477f3-d19b-49c2-9827-2cc2d86233e6
+md"""
+## BetaZero (online)
+"""
+
+# ╔═╡ 47fb1fc3-dbeb-4696-ae7a-d0f049c3ccf3
+md"""
+TODO: policy plot within BetaZero (not raw network)
+"""
+
+# ╔═╡ 7ef35aa9-8558-40aa-abee-1f3b671004c0
+length(Σ_small)*length(M_small)
+
+# ╔═╡ 35c24d73-3c31-4d8b-9ab3-3acc359911d7
+length(Σ)*length(M)
+
+# ╔═╡ bfa256df-3c81-4d55-8384-aa277ea3a645
+
+
+# ╔═╡ 98b53fd7-d853-4869-849b-e6875ab89c5d
+# heatmap(Σ, M, Yπ_online, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online)", cmap=palette(:viridis, 3))
+
+# ╔═╡ 9c523eb3-94ce-4fe6-a241-b9fa7d1df25b
+# convert_s(ParticleHistoryBelief, [0, 0], solver.bmdp)
+
+# ╔═╡ 05d7ecc1-34c4-4b34-bd3b-4cb3ad0267b7
+function POMDPs.value(policy::BetaZeroPolicy, b)
+	a, info = action_info(policy, b; tree_in_info=true)
+	tree = info[:tree]
+	q = tree.q
+	return q[1] # root node value
+end
+
+# ╔═╡ f60f4c7a-9b4b-48c2-921b-0fa4214ba435
+value_online = (x,y,policy) -> begin
+	Random.seed!(0)
+	value(policy, convert_s(ParticleHistoryBelief, [x, y], solver.bmdp))
+end
+
+# ╔═╡ bc965027-5da1-4377-9ed5-e72b9452d526
+policy.planner.solver.n_iterations = 10; # NOTE.
+
+# ╔═╡ 54b15814-9d64-4799-bdfb-514e2a3e48bb
+# ╠═╡ disabled = true
+#=╠═╡
+value_online_large = [value_online(y,x,en_policy) for y in M, x in Σ];
+  ╠═╡ =#
+
+# ╔═╡ e6732dc1-ab93-4d61-b215-168cbb00c0ee
+#=╠═╡
+heatmap(Σ, M, value_online_large, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online)", cmap=shifted_colormap(value_online_large))
+  ╠═╡ =#
+
+# ╔═╡ 86f1ed3f-d58a-44bf-ba6c-dbb2b04b4e8c
+heatmap(Σ, M, Yπ, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (NN)", cmap=palette(:viridis, 3))
 
 # ╔═╡ 64f10375-ad0b-4640-b117-fe96bf1ea9e1
-heatmap(Σ, M, Yπ, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (NN)", cmap=palette(:viridis, 3))
+heatmap(Σ, M, Yπ_uncertain, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (NN)", cmap=cgrad([:white, :darkblue, :green, :gold], categorical=true)) # palette(:viridis, 3))
+
+# ╔═╡ 0dea654f-e4de-4ecf-8ad4-ca2ec76136c9
+Yπ64 = (y,x)->as[argmax(policy64.surrogate(Float32.([x y])')[2:end])]
+
+# ╔═╡ 2bd13b69-31fc-4885-a5f5-d95457873445
+heatmap(Σ, M, Yπ64, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (64-NN)", cmap=palette(:viridis, 3))
+
+# ╔═╡ 8c6f978c-afe6-481e-a52d-63fb597737d5
+policy64.planner.solver.n_iterations = 10; # NOTE for 'online' results
+
+# ╔═╡ b0caab16-2b08-4683-b14f-ba3bcf3275ef
+value_online_small64 = [value_online(y,x,policy64) for y in M_small, x in Σ_small];
+
+# ╔═╡ e84ca904-a339-4d43-a3ae-41988868ecee
+heatmap(Σ_small, M_small, value_online_small64, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online [64])", cmap=shifted_colormap(value_online_small64))
+
+# ╔═╡ f278d28d-ccd0-411a-a74e-fbaa4efca965
+begin
+	value_online_64 = [value_online(y,x,policy64) for y in M, x in Σ];
+	heatmap(Σ, M, value_online_64, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online [64])", cmap=shifted_colormap(value_online_64))
+end
+
+# ╔═╡ df1ca98b-68a2-413d-9253-fe709d463ce9
+begin
+	Yπ_online64 = (y,x)->action(policy64, convert_s(ParticleHistoryBelief, [x, y], solver.bmdp))
+	heatmap(Σ_small, M_small, Yπ_online64, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online [64])", cmap=palette(:viridis, 3))
+end
+
+# ╔═╡ f9f24938-4e9e-46bf-926a-646c937e48e2
+heatmap(Σ, M, Yπ_online64, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online [64])", cmap=palette(:viridis, 3))
+
+# ╔═╡ c5591821-7615-4351-9a01-12c82efb746f
+md"""
+## RGB policy plot
+"""
+
+# ╔═╡ 8b172603-92f0-4750-823e-02fc61eeaa6b
+Yπ_rgb = (y,x)->as[argmax(policy.surrogate(Float32.([x y])')[2:end])]
+
+# ╔═╡ 1d309991-1c38-40e3-874a-884dc83709da
+# heatmap(Σ, M, Yπ_rgb, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy distribution (NN)", c=policy_rbgs)
+
+# ╔═╡ 5658517d-5b0e-4a58-982d-e7cb08b3522e
+md"""
+| | | |
+| --- | --- | --- |
+| `red (-1)` | `green (0)` | `blue (+1)` |
+"""
 
 # ╔═╡ 0feeb06c-3f6d-4ec7-b795-9a1c52fc0e69
 0.90^20 * 100 # e.g., up +1x10, down +1x10, stop action 0
+
+# ╔═╡ 11d10167-0a74-4153-b618-52ae07889324
+md"""
+## Gaussian procces
+"""
 
 # ╔═╡ 4f5e76f2-97d3-418e-a1e5-2fc558fbddcb
 heatmap(Σ, M, Y_gp, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap([Y_gp(x,y) for x in Σ for y in M]))
@@ -232,6 +541,70 @@ Y_gp_a = (y,x)->policy_gp_a.surrogate(Float64.([x y fixed_skew fixed_kurt fixed_
 # ╔═╡ 607ed6b8-af59-402a-b9ba-6786bb3f248c
 # heatmap(Σ, M, Y_gp_a, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="value (GP)", cmap=shifted_colormap([Y_gp_a(x,y) for x in Σ for y in M]))
 
+# ╔═╡ 1bea8485-6ccd-4108-a97d-9669f6669da8
+md"""
+# Light-dark visualizations
+"""
+
+# ╔═╡ 14ea3b14-a718-43de-a126-7910fb4e02c1
+PlotLightDark = ingredients("../scripts/plot_lightdark.jl")
+
+# ╔═╡ 2f598533-6de2-4029-b3f9-7a2904c8d766
+plot_lightdark = PlotLightDark.plot_lightdark;
+
+# ╔═╡ f98dd3af-2af8-40b1-b71e-d8e842b411c3
+begin
+	en_policy = BetaZero.attach_surrogate!(deepcopy(policy), en)
+	en_policy.planner.solver.n_iterations = 10; # NOTE.
+end;
+
+# ╔═╡ 598bf115-667e-49e5-bdad-bcef4e3e1cbc
+Yπ_online = (y,x)->action(en_policy, convert_s(ParticleHistoryBelief, [x, y], solver.bmdp))
+
+# ╔═╡ 63364798-48c4-4a7b-8f91-29bda69307f1
+heatmap(Σ_small, M_small, Yπ_online, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online)", cmap=palette(:viridis, 3))
+
+# ╔═╡ 1e5d06fe-7036-4a13-83ec-7cf301573c25
+Random.seed!(0); value(en_policy, convert_s(ParticleHistoryBelief, [0, 1], solver.bmdp))
+
+# ╔═╡ bb851367-0421-4e36-b20b-d11fc57874b5
+value_online_small = [value_online(y,x,en_policy) for y in M_small, x in Σ_small];
+
+# ╔═╡ ff8d9df0-7635-4f9e-a3ee-c279977f8173
+heatmap(Σ_small, M_small, value_online_small, xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online)", cmap=shifted_colormap(value_online_small))
+
+# ╔═╡ cd4dab5b-a7cd-4e07-b6aa-98d1220ad0c8
+policy_rbgs = [RGB(en_policy.surrogate(Float32.([y x])')[2:end]...) for x in Σ, y in M];
+
+# ╔═╡ 38e1c560-beaf-4c2e-8f5c-d6b08a4d3273
+plot(imresize(rotl90(policy_rbgs), 400, 600))
+
+# ╔═╡ 74f2b6ec-4e5a-4887-8e31-3cd41d54b375
+shared_seed = 1;
+
+# ╔═╡ 6d822d41-f49a-4d11-8266-e41a02f5aaa1
+# NOTE change to initial state distribution
+POMDPs.initialstate(pomdp::LightDarkPOMDP) = initialstate(pomdp; isuniform=true)
+
+# ╔═╡ 2acb5d21-e5b4-446c-80d0-ee98f3bbd4a7
+# plot_lightdark(pomdp_cost, en_policy, up; max_steps=20, seed=shared_seed)
+
+# ╔═╡ dd9e1fcc-79c1-4452-b032-51f918303f17
+# plot_lightdark(pomdp_cost, policy, up; max_steps=100, seed=shared_seed)
+
+# ╔═╡ 73e8ca7f-cf0a-431f-8625-7e317224bed4
+begin
+	radius = 60
+	ps = ones(2*div(radius,2)+1)
+    ps /= length(ps)
+    rand(SparseCat(div(-radius,2):div(radius,2), ps), 1000000) |> histogram
+end
+
+# ╔═╡ 6f7bc73f-3961-45af-90ff-002e02dbe9eb
+md"""
+# Sims
+"""
+
 # ╔═╡ 9186d51c-dac7-4b21-b4eb-3cd724bb1a3e
 # ╠═╡ disabled = true
 #=╠═╡
@@ -240,6 +613,18 @@ data = BetaZero.sample_data(solver.data_buffer_valid, 1000)
 
 # ╔═╡ ce006bd6-d691-4efb-b740-4ddc258416c4
 pomdp = solver.pomdp;
+
+# ╔═╡ ccf70808-5103-4279-846d-237f888fba01
+begin
+	pomdp_cost = deepcopy(pomdp)
+	pomdp_cost.movement_cost = 0.1
+end;
+
+# ╔═╡ e20fbafd-0f76-4862-a1b3-a7fff41b47b1
+[s.y for s in rand(initialstate(pomdp; isuniform=true), 1000000)] |> histogram
+
+# ╔═╡ ad45a730-5950-43b6-ba6b-82ff9373c59d
+[s.y for s in rand(initialstate(pomdp; isuniform=false), 1000000)] |> histogram
 
 # ╔═╡ f97f9786-5cc7-478f-997c-2fb26053a504
 begin
@@ -316,33 +701,193 @@ md"""
 # Gaussian process regression
 """
 
-# ╔═╡ fa79f064-81df-476c-a3fb-5271bee3cd5a
-data = BSON.load("data1.bson")[:data];
+# ╔═╡ 47057cbd-508c-48d8-a2aa-59f3a5296481
+dX = solver.data_buffer_train[1].X
 
-# ╔═╡ 410bdb7a-a201-47fb-9a92-9910b5b93ca0
-data2 = BSON.load("data2.bson")[:data2];
+# ╔═╡ 2a860403-efcf-40d9-81a0-bd0f2b76081a
+dYV = solver.data_buffer_train[1].Y[1,:]
+
+# ╔═╡ ac665280-9b69-4eb4-b4ca-e794fb3da01b
+histogram2d(dX[2,:], dX[1,:], nbins=100, c=:viridis, show_empty_bins=false)
+
+# ╔═╡ b4a20910-2b1c-4697-9140-eb619fffbe40
+dX[2,:]
+
+# ╔═╡ 8dca08c1-e469-44a1-95ad-af4c76ba2729
+itp = LinearInterpolation((dX[1,:], dX[2,:]), dYV)
+
+# ╔═╡ b2c7630b-3673-4158-9e91-4fbd2f471d08
+function tli()
+	x = range(-2, 3, length=20)
+	y = range(3, 4, length=10)
+	z = @. cos(x) + sin(y')
+	# Interpolatant object
+	itp = LinearInterpolation((x, y), z)
+end
+
+# ╔═╡ 92d0d38f-9fb6-4c08-b569-6b336d8fba8a
+heatmap(dX[2,:], dX[1,:], [dyv for dyv in dYV, _ in dYV], cmap=shifted_colormap(dYV))
+
+# ╔═╡ 32c79abb-122c-421a-831e-28b4faaad279
+
+
+# ╔═╡ c6a3bcf0-c7f4-468a-9884-f7fe4231ab5d
+repeat(dYV, outer=2)
+
+# ╔═╡ ce515ed9-bac3-4b48-977f-c94937eebe8f
+#=╠═╡
+gp_plts[2]
+  ╠═╡ =#
+
+# ╔═╡ 42999b4d-7b41-41b8-b719-2e375d890c97
+function basis_regression(X, y, ϕ)
+    B = mapreduce(x->ϕ(x)', vcat, X)
+    θ = B\y
+    return x -> ϕ(x)'θ
+end
+
+# ╔═╡ 2694d4ba-5eaf-4bf7-a9eb-a9e407163cf1
+ϕdegree(x, a=x[1], b=x[2]) =
+	[1, 
+     a, b,
+     a^2, a*b, b^2,
+     a^3, a^2*b, a*b^2, b^3,
+     a^4, a^3*b, a^2*b^2, a*b^3, b^4,
+     a^5, a^4*b, a^3*b^2, a^2*b^3, a*b^4, b^5,
+     a^6, a^5*b, a^4*b^2, a^3*b^3, a^2*b^4, a*b^5, b^5]
+
+# ╔═╡ 7b237f3d-6898-4c57-b672-7449f8a485b0
+ϕ2(x) = [1, norm(x,2), norm(x.^2, 2), norm(x.^3, 2), norm(x.^4, 2), norm(x.^5, 2), norm(x.^6, 2), norm(x.^7, 2)]
+
+# ╔═╡ bcd84550-5656-4997-a4ce-1167852c7eec
+ϕ3(x) = [1, norm(x,Inf), norm(x.^2,Inf), norm(x.^3,Inf), norm(x.^4,Inf), norm(x.^5,Inf), norm(x.^6,Inf), norm(x.^7,Inf)]
+
+# ╔═╡ f7a13b63-f7f5-41cf-bad4-7d8a5f588c6d
+ϕ4(x) = [1, sum(x), sum(x.^2), sum(x.^3), sum(x.^4), sum(x.^5), sum(x.^6), sum(x.^7)]
+
+# ╔═╡ c32085e0-8f24-4e87-bedc-d18e8197e575
+function run_rb(rb::Vector, b̃)
+	return as[argmax(softmax(map(f->f(b̃), rb)))]
+end
 
 # ╔═╡ 59ca30e3-7397-4245-8985-c25795e46750
-m = 100
+begin
+	mt = 1000
+	mv = trunc(Int, mt*0.8)
+end
+
+# ╔═╡ 8d818d7f-0f98-4131-a723-12fd164d218f
+data = BetaZero.sample_data(solver.data_buffer_train, mt);
+
+# ╔═╡ 31684f7c-f5ad-4ea9-993e-cd19c38a8eae
+data2 = BetaZero.sample_data(solver.data_buffer_valid, mv);
+
+# ╔═╡ fa79f064-81df-476c-a3fb-5271bee3cd5a
+# data = BSON.load("data1.bson")[:data];
+
+# ╔═╡ 410bdb7a-a201-47fb-9a92-9910b5b93ca0
+# data2 = BSON.load("data2.bson")[:data2];
+
+# ╔═╡ 8f0506e3-30df-4093-afa1-cb035673cf01
+@bind ℓ_slide_P Slider([0.1:0.1:10;], show_value=true)
+
+# ╔═╡ c5332871-a0d3-4586-8be3-643fcd9bb392
+@bind σ_slide_P Slider([0.1:0.1:10;], show_value=true)
+
+# ╔═╡ 00a84f88-9d7e-4344-b813-f66b6a70c394
+solver.gp_params
+
+# ╔═╡ 6b2514dd-4312-4030-b4b0-d26d6f936c5d
+@bind ℓ_slide Slider([0.1:0.1:10;], show_value=true)
+
+# ╔═╡ 46166104-92e8-4f5a-bcd4-35435f18aa63
+@bind σ_slide Slider([0.1:0.1:10;], show_value=true)
+
+# ╔═╡ f067942f-86a6-4edc-bcf0-78fecb6455a0
+begin
+	solver.gp_params.verbose_plot = false
+	solver.gp_params.kernel = SE(log(ℓ_slide), log(σ_slide))
+	solver.gp_params.n_samples = 100
+	f_init = BetaZero.initialize_gaussian_proccess(solver)
+	f_train = BetaZero.train(f_init, solver; verbose=false)
+end
+
+# ╔═╡ 0cf1d477-d750-4a45-8bd7-7a3c061c6532
+heatmap(Σ_small, M_small, (x,y)->as[argmax(f_train.fP([x,y]))], xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online)", cmap=palette(:viridis, 3))
+
+# ╔═╡ b3e3c159-31f8-4d3f-b062-43dc4b940db6
+
+
+# ╔═╡ 12458ba9-10ed-4ebc-88fd-140f86b79920
+solver.gp_params.kernel.σ2
+
+# ╔═╡ a8782a5e-9a51-470b-9d89-c8188c04dc12
+results = BetaZero.gp_tune(pomdp, solver, f_init;
+	ℓ_range=Distributions.Uniform(0.0001, 50),
+	σ_range=Distributions.Uniform(0.0001, 50),
+	resources=10000)
+
+# ╔═╡ 93be835a-a3e0-4147-a2ad-3a86d93a34b5
+begin
+	# gp_value_θ, gp_value_err, fV_tuned = collect(values(results["value"]))[argmin(map(v->v[2], values(results["value"])))]
+	gp_value_θ, gp_value_err, fV_tuned = results["value"]
+	gp_ỹ_tuned = [fV_tuned([x,y]) for x in M, y in Σ] # NOTE x-y flip
+	cmap_model_tuned = shifted_colormap(gp_ỹ_tuned)
+	plt_gp_tuned_v = heatmap(Σ, M, gp_ỹ_tuned, c=cmap_model_tuned)
+end;
+
+# ╔═╡ 980c2630-b66b-423f-8153-3a979c16bdf6
+begin
+	# gp_policy_θ, gp_policy_err, fP_tuned = collect(values(results["policy"]))[argmin(map(v->v[2], values(results["policy"])))]
+	gp_policy_θ, gp_policy_err, fP_tuned = results["policy"]
+	gp_p̃_tuned = [as[argmax(fP_tuned([x,y]))] for x in M, y in Σ] # NOTE x-y flip
+	plt_gp_tuned_p = heatmap(Σ, M, gp_p̃_tuned, c=palette(:viridis, 3))
+end;
+
+# ╔═╡ 31a99d07-aa61-46e1-827f-05d3023d0a09
+plot(plt_gp_tuned_v, plt_gp_tuned_p, layout=2, size=(800,300))
+
+# ╔═╡ 61284855-5286-487a-b6b0-f8a24adb28a3
+gp_policy_θ
 
 # ╔═╡ d4d9e5b3-3f6c-4936-9592-8b08ed02a09e
 begin
-    X = data.X[:,1:m]'
-    X2 = data2.X[:,1:m]'
-    y = data.Y[1:m]
-    y2 = data2.Y[1:m]
+    X = data.X[:,1:mt]'
+    X2 = data2.X[:,1:mv]'
+    y = data.Y[1:mt]
+    y2 = data2.Y[1:mv]
 	gp_X = Float64.(X)'
-    gp_mean = MeanConst(Float64(mean(y)))
+    gp_mean = MeanZero() # MeanConst(Float64(mean(y)))
 end; md"$X,y$"
+
+# ╔═╡ 8f196424-1b11-4ee5-bc58-ee5284fdf098
+br_predict = basis_regression(collect(eachcol(gp_X)), y, ϕdegree)
+
+# ╔═╡ 894ee284-a417-4017-9696-6f741706f179
+begin
+	rbPs = []
+	num_actions = length(actions(pomdp))
+    for i in 1:num_actions
+        y_train_Pi = data.Y[i,:]
+		fPi = basis_regression(collect(eachcol(gp_X)), y_train_Pi, ϕ2)
+        push!(rbPs, fPi)
+    end
+end
+
+# ╔═╡ dc49a10c-4648-4e8d-bc85-cc6cfc073c5c
+run_rb(rbPs, [0,0])
+
+# ╔═╡ 7d7670e3-d07b-4175-b399-68327a1c3b03
+heatmap(Σ, M, (x,y)->run_rb(rbPs, [x,y]), xlabel="\$\\sigma(b)\$", ylabel="\$\\mu(b)\$", title="policy (BetaZero online)", cmap=palette(:viridis, 3))
+
+# ╔═╡ 886e5e3c-ec60-4da3-bf49-18e811578853
+rbPs
 
 # ╔═╡ 88362011-8e3b-45de-b451-57265459aa71
 fgp = gp->xy->predict_f(gp, Float64.(reshape(xy, (:,1))))[1][1] # mean
 
-# ╔═╡ 6b2514dd-4312-4030-b4b0-d26d6f936c5d
-@bind ℓ_slide Slider([0.1;], show_value=true)
-
-# ╔═╡ 46166104-92e8-4f5a-bcd4-35435f18aa63
-@bind σ_slide Slider([0.1;], show_value=true)
+# ╔═╡ 87d7505d-2edb-401d-ac2e-9386f5ccad5f
+σgp = gp->xy->predict_f(gp, Float64.(reshape(xy, (:,1))))[2][1] # std
 
 # ╔═╡ baa3ab4f-be38-4851-a851-4a37b38a3f66
 begin
@@ -358,12 +903,29 @@ begin
 	kernel = SE(ll, lσ)
 
 	gp = GP(gp_X, y, gp_mean, kernel)
-	f = fgp(gp)
+	f2 = fgp(gp)
+	σ2 = σgp(gp)
+end
+
+# ╔═╡ 8d465a2a-2138-4415-92aa-f0c4c20bdd6d
+gp.kernel.σ2 = 6.25
+
+# ╔═╡ 5be544ba-d05f-4e4e-b88e-3f7cc1ee79c4
+begin
+	# gp_lcb_small = [f([x,y]) - σ([x,y]) for x in M, y in Σ] # NOTE x-y flip
+	gp_ỹ_small = [f2([x,y]) for x in M_small, y in Σ_small] # NOTE x-y flip
+	cmap_model_small = shifted_colormap(gp_ỹ_small)
+	plt_gp_mean = heatmap(Σ_small, M_small, gp_ỹ_small, c=cmap_model_small)
+	
+	gp_std_small = [σ2([x,y]) for x in M_small, y in Σ_small] # NOTE x-y flip
+	plt_gp_std = heatmap(Σ_small, M_small, gp_std_small, c=:viridis)
+
+	plot(plt_gp_mean, plt_gp_std, layout=2, size=(700,200))
 end
 
 # ╔═╡ e56a6370-00e5-4305-8062-8106dc2df9cb
 begin
-	gp_error(x, y) = (y - f(x))^2
+	gp_error(x, y) = (y - f2(x))^2
 	mean_error_train = mean(gp_error(xi, yi) for (xi,yi) in zip(eachrow(X), y))
 	mean_error_valid = mean(gp_error(xi, yi) for (xi,yi) in zip(eachrow(X2), y2))
 	@info "Mean error (train): $mean_error_train"
@@ -371,6 +933,8 @@ begin
 end
 
 # ╔═╡ fc28e360-a595-46e3-ba32-d917ce0b9f63
+# ╠═╡ disabled = true
+#=╠═╡
 begin
 	loss_train = Float64[]
 	loss_valid = Float64[]
@@ -395,33 +959,48 @@ begin
 		end
 	end
 end
+  ╠═╡ =#
 
 # ╔═╡ 2e512cda-bba3-4cc9-9110-132ffa37e9e5
+#=╠═╡
 begin
 	# heatmap(ℓ_range, σ_range, reshape(loss_valid, (length(ℓ_range),length(σ_range)))')
 	heatmap(ℓ_range, σ_range, losses')
 	xlabel!("\$\\ell\$")
 	ylabel!("\$\\sigma\$")
 end
+  ╠═╡ =#
 
 # ╔═╡ 1ae1a1e8-aaec-47b2-9ced-6fd8afc48b9e
+#=╠═╡
 begin
 	best = argmin(losses)
 	# ℓ = ℓ_range[best.I[1]]
 	# σ = σ_range[best.I[2]]
 end
+  ╠═╡ =#
 
 # ╔═╡ 01f7dcdf-fff2-4b58-93da-585c1cebd193
+#=╠═╡
 ℓ_range[best.I[1]], σ_range[best.I[2]]
+  ╠═╡ =#
 
 # ╔═╡ b9cb080f-087f-4d4b-b575-2190652b92ea
+#=╠═╡
 begin
 	plot(loss_valid, label="valid")
 	plot!(loss_train, label="train")
 end
+  ╠═╡ =#
 
 # ╔═╡ 8f2b6e82-4e3d-440d-ba16-ad043b833b97
 normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))
+
+# ╔═╡ c455f35d-25d7-44d7-90dd-a2cb9c42020c
+begin
+	scatter_cmap = shifted_colormap(dYV)
+	scatter(dX[2,:], dX[1,:], alpha=0.1, cmap=[get(scatter_cmap, normalize01(yi,dYV)) for yi in dYV])
+end
 
 # ╔═╡ 9ee1c3b0-d600-402f-bc42-4fa2feeee807
 begin
@@ -446,7 +1025,18 @@ begin
 	cmap_model = shifted_colormap(gp_ỹ)
 end
 
+# ╔═╡ d9acdd13-cb52-4ea3-a493-2534f43e236a
+begin
+	Xrange = range(0, stop=5, length=100)
+	Yrange = range(-10, stop=10, length=100)
+	br_Y = [br_predict([x,y]) for x in Yrange, y in Xrange] # NOTE x-y
+	heatmap(Xrange, Yrange, br_Y, cmap=shifted_colormap(br_Y))
+	scatter!(X[:,2], X[:,1], cmap=[get(cmap_data, normalize01(yi,y)) for yi in y], marker=:square, msc=:gray, alpha=0.5, label="training")
+end
+
 # ╔═╡ c361ac8e-51bf-436b-a195-b728ceceb4ce
+# ╠═╡ disabled = true
+#=╠═╡
 begin
 	gp_plts = []
 	for training in [true, false]
@@ -469,38 +1059,179 @@ begin
 		push!(gp_plts, plot!())
 	end
 end
-
-# ╔═╡ ce515ed9-bac3-4b48-977f-c94937eebe8f
-gp_plts[2]
+  ╠═╡ =#
 
 # ╔═╡ eebb4757-83de-490a-84d5-52f988708c3a
+#=╠═╡
 gp_plts[1]
+  ╠═╡ =#
 
 # ╔═╡ ddbf075e-539e-49a7-8a1b-a8e7b6eb644f
+#=╠═╡
 gp_plts[2]
+  ╠═╡ =#
 
 # ╔═╡ 1fa63234-37e4-4b12-a064-6a55b2ee0b67
+#=╠═╡
 gp_plts[3]
+  ╠═╡ =#
 
 # ╔═╡ 047c2c69-d662-4dba-b8b6-c25167178ecb
 md"""
 # Plots
 """
 
+# ╔═╡ 0f8578cd-37f5-4ecd-b9eb-6a6351750fa9
+plot([1], [1], marker=false)
+
 # ╔═╡ 743cf6ad-ddaa-403f-8ab8-83513c804134
-ho_μ = [4.236551205969867, 3.652028459679382, 7.7944189894548614, 10.318113003732424, 10.287302809230992, 11.526361419485301, 12.069473152343456, 11.84934767877954, 8.896239195886608, 10.044561362443707, 10.965512347196158, 10.435503538777873, 7.1999703177673124, 7.129402415779563, 10.84189518533771, 10.900835704243512, 11.63269827863645, 12.132977187490116, 11.389794019740489, 12.749711348500671, 10.38277757430994, 10.595804967910901, 13.398598348450202, 12.701389219548489, 9.295595397652649, 11.292780474121894, 11.140712120404325, 10.973793896874584, 13.351930654269845, 12.04749657661156, 12.782538022214517, 10.921692721641527, 12.664604736899955, 11.719984818431652];
+ho_μ = [m.mean for m in solver.holdout_metrics];
+# ho_μ = [4.236551205969867, 3.652028459679382, 7.7944189894548614, 10.318113003732424, 10.287302809230992, 11.526361419485301, 12.069473152343456, 11.84934767877954, 8.896239195886608, 10.044561362443707, 10.965512347196158, 10.435503538777873, 7.1999703177673124, 7.129402415779563, 10.84189518533771, 10.900835704243512, 11.63269827863645, 12.132977187490116, 11.389794019740489, 12.749711348500671, 10.38277757430994, 10.595804967910901, 13.398598348450202, 12.701389219548489, 9.295595397652649, 11.292780474121894, 11.140712120404325, 10.973793896874584, 13.351930654269845, 12.04749657661156, 12.782538022214517, 10.921692721641527, 12.664604736899955, 11.719984818431652];
 
 # ╔═╡ 7c7b0c5a-ca81-4906-b0a2-ab0c2f1b7782
-ho_σ = [32.52126580543532, 11.409984157920357, 13.594869250610236, 12.28528625779923, 12.521762409373638, 9.89231860480156, 15.343509355635812, 12.533694460944085, 14.233244899468765, 7.131522004805157, 13.408475142519846, 13.667394373029472, 13.064810931241205, 18.11261239946177, 13.86379431526749, 7.8652487728454386, 5.484074355145341, 8.431818002213413, 9.877067852736923, 10.32565045807811, 9.910889011516751, 10.97362461662418, 5.087895762661509, 9.183794792257446, 16.521760832568063, 10.830610073878386, 9.055981842492336, 9.91984691155096, 5.417702137482001, 8.05703332380186, 8.251618277655956, 11.131211067924784, 6.7756796175012, 12.095940437591379];
+ho_σ = [m.std for m in solver.holdout_metrics];
+# ho_σ = [32.52126580543532, 11.409984157920357, 13.594869250610236, 12.28528625779923, 12.521762409373638, 9.89231860480156, 15.343509355635812, 12.533694460944085, 14.233244899468765, 7.131522004805157, 13.408475142519846, 13.667394373029472, 13.064810931241205, 18.11261239946177, 13.86379431526749, 7.8652487728454386, 5.484074355145341, 8.431818002213413, 9.877067852736923, 10.32565045807811, 9.910889011516751, 10.97362461662418, 5.087895762661509, 9.183794792257446, 16.521760832568063, 10.830610073878386, 9.055981842492336, 9.91984691155096, 5.417702137482001, 8.05703332380186, 8.251618277655956, 11.131211067924784, 6.7756796175012, 12.095940437591379];
 
 # ╔═╡ 351d5b4f-4347-441a-88ef-06d54eaf0c16
-n_ho = 100;
+n_ho = solver.params.n_holdout;
 
 # ╔═╡ 058622d9-db81-4a0b-a7a7-dcc5fb765090
 ho_stderr = ho_σ ./ sqrt(n_ho);
 
+# ╔═╡ e52988c7-a2d1-411c-a0cf-119180b2d0e0
+begin
+	ho_accs = [mean_and_std(m.accuracies) for m in solver.holdout_metrics]
+	ho_acc_μ = first.(ho_accs)
+	ho_acc_σ = last.(ho_accs)
+	ho_acc_stderr = ho_acc_σ ./ sqrt(n_ho)
+end;
+
+# ╔═╡ fd9ece7a-2466-47b8-94b5-02dd5f3181ca
+begin
+	pm_returns = BetaZero.returns_over_time(solver, mean_and_std)
+	pm_μ = first.(pm_returns)
+	pm_σ = last.(pm_returns)
+	n_pm = solver.params.n_data_gen;
+	pm_stderr = pm_σ ./ sqrt(n_pm)
+end;
+
+# ╔═╡ d1977228-b7a2-4a87-b556-c111039509ce
+begin
+	pm_accs = BetaZero.accuracy_over_time(solver, mean_and_std)
+	pm_acc_μ = first.(pm_accs)
+	pm_acc_σ = last.(pm_accs)
+	pm_acc_stderr = pm_acc_σ ./ sqrt(n_pm)
+end;
+
+# ╔═╡ ad0b9cfa-a1e6-479c-99ae-179b778c716b
+solver.holdout_metrics
+
+# ╔═╡ daafbdec-0311-4981-a8e2-201edeca5b1e
+lavi_results = (12.94, 0.498) # mean, stderr
+
+# ╔═╡ a68e35de-883c-46ec-ab66-6a77b43a04c7
+lavi_acc_results = (0.856, 0.011) # mean, stderr
+
+# ╔═╡ 99608de8-ef1c-473c-a8d4-f21d9800e389
+function rolling_max(Y, Y2=nothing)
+	max_Y = Vector{Float64}(undef, length(Y))
+	use_Y2 = !isnothing(Y2)
+	if use_Y2
+		max_Y2 = Vector{Float64}(undef, length(Y2))
+	end
+	for i in eachindex(Y)
+		if i == 1
+			max_Y[i] = Y[i]
+			if use_Y2
+				max_Y2[i] = Y2[i]
+			end
+		else
+			prev_max_idx = argmax(max_Y[1:i-1])
+			prev_max = max_Y[prev_max_idx]
+			curr_max_idx = Y[i] > prev_max ? i : prev_max_idx
+			max_Y[i] = Y[curr_max_idx]			
+			# max_Y[i] = max(Y[i], maximum(max_Y[1:i-1]))
+			if use_Y2
+				max_Y2[i] = Y2[curr_max_idx]
+			end
+		end
+	end
+	if use_Y2
+		return max_Y, max_Y2
+	else
+		return max_Y
+	end
+end
+
+# ╔═╡ b4689f1e-e0fd-4bdf-b257-025357fbdcfe
+max_returns_pm, max_returns_ho = rolling_max(pm_μ, ho_μ[1:end-1]); # HO has extra run
+
+# ╔═╡ c0da29e4-fcef-4d3a-8552-e0ebe1664947
+# max_returns_ho = rolling_max(ho_μ);
+
+# ╔═╡ 61374576-9bda-457b-9cad-bad116444c93
+# begin
+# 	plot(title="mean returns", ylabel="returns", xlabel="iteration")
+# 	hline!([lavi_results[1]], ribbon=lavi_results[2], fillalpha=0.2, ls=:dash, lw=1, c=:black, label="LAVI")
+
+# 	plot!(max_returns_pm, lw=2, label="BetaZero (data collection)", ls=:dash, c=:crimson, alpha=0.5)
+
+# 	plot!(max_returns_ho, lw=2, label="BetaZero (holdout)", c=:darkgreen)
+# end
+
 # ╔═╡ abb43a1b-2099-4685-81b8-ccb660c3b91e
-plot(ho_μ, ribbon=ho_stderr, fillalpha=0.2, lw=2, label="holdout returns", ylabel="returns", xlabel="iteration", c=:darkgreen)
+begin
+	plot(title="mean returns", ylabel="returns", xlabel="iteration")
+	hline!([lavi_results[1]], ribbon=lavi_results[2], fillalpha=0.2, ls=:dash, lw=1, c=:black, label="LAVI")
+
+	plot!(pm_μ, ribbon=pm_stderr, fillalpha=0.2, lw=2, label="BetaZero (data collection)", ls=:dash, c=:crimson, alpha=0.5)
+
+	plot!(ho_μ, ribbon=ho_stderr, fillalpha=0.2, lw=2, label="BetaZero (holdout)", c=:darkgreen)
+end
+
+# ╔═╡ 1f0c9888-b894-4ef1-9bff-f594f97858dd
+ho_acc_μ[23], ho_acc_σ[23]
+
+# ╔═╡ cfc6721e-b68f-4c2f-8d5a-0e5553f7e049
+max_accs_pm, max_accs_ho = rolling_max(pm_acc_μ, ho_acc_μ[1:end-1]);# HO has extra run
+
+# ╔═╡ f1a83226-62cf-4942-8d9c-7eb957021f8f
+max_accs_pm[end]
+
+# ╔═╡ cbaae95d-583a-4acc-bbb5-0f9c527ad9f8
+max_accs_ho[end]
+
+# ╔═╡ 520d50a4-8d67-448c-b8b1-4abdec40b369
+# begin
+# 	plot(title="accuracy", ylabel="accuracy", xlabel="iteration")
+# 	hline!([lavi_acc_results[1]], ribbon=lavi_acc_results[2], fillalpha=0.2, ls=:dash, lw=1, c=:black, label="LAVI")
+
+# 	plot!(max_accs_pm, lw=2, label="BetaZero (data collection)", ls=:dash, c=:crimson, alpha=0.5)
+
+# 	plot!(max_accs_ho, lw=2, label="BetaZero (holdout)", c=:darkgreen)
+
+# 	ylims!(ylims()[1], 1.01)
+# end
+
+# ╔═╡ e60856cf-9e2e-4759-806e-409746af824b
+begin
+	plot(title="accuracy", ylabel="accuracy", xlabel="iteration")
+	hline!([lavi_acc_results[1]], ribbon=lavi_acc_results[2], fillalpha=0.2, ls=:dash, lw=1, c=:black, label="LAVI")
+
+	plot!(pm_acc_μ, ribbon=pm_acc_stderr, fillalpha=0.2, lw=2, label="BetaZero (data collection)", ls=:dash, c=:crimson, alpha=0.5)
+
+	plot!(ho_acc_μ, ribbon=ho_acc_stderr, fillalpha=0.2, lw=2, label="BetaZero (holdout)", c=:darkgreen)
+
+	ylims!(ylims()[1], 1.01)
+end
+
+# ╔═╡ a88be53e-b4df-4146-a73e-81259c6214d5
+md"""
+---
+"""
+
+# ╔═╡ 1c70d431-0549-4736-8131-287ad37f3c1e
+TableOfContents()
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -511,10 +1242,16 @@ DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GaussianProcesses = "891a1506-143c-57d2-908e-e1f8e92e6de9"
+GridInterpolations = "bb4c363b-b914-514b-8517-4eb369bc008a"
+Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 LightDark = "a1c7e911-b2d9-4cdc-ae72-88f9232b4333"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LocalApproximationValueIteration = "a40420fb-f401-52da-a663-f502e5b95060"
+LocalFunctionApproximation = "db97f5ab-fc25-52dd-a8f9-02a257c35074"
 MCTS = "e12ccd36-dcad-5f33-8774-9175229e7b33"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 POMDPModels = "355abbd5-f08e-5560-ac9e-8b5f2592a0ca"
 POMDPTools = "7588e00f-9cae-40de-98dc-e0c70c48cdd7"
 POMDPs = "a93abf59-7444-517b-a68a-c42f96afdd7d"
@@ -535,9 +1272,15 @@ DataStructures = "~0.18.13"
 Distributions = "~0.25.81"
 Flux = "~0.13.13"
 GaussianProcesses = "~0.12.5"
+GridInterpolations = "~1.1.2"
+Images = "~0.25.2"
+Interpolations = "~0.14.7"
 LightDark = "~0.1.0"
+LocalApproximationValueIteration = "~0.4.3"
+LocalFunctionApproximation = "~1.1.0"
 MCTS = "~0.5.1"
 NNlib = "~0.8.19"
+Optim = "~1.7.4"
 POMDPModels = "~0.4.16"
 POMDPTools = "~0.1.3"
 POMDPs = "~0.9.5"
@@ -555,7 +1298,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "51c55380100bcfe789ec256eb674cf6894232684"
+project_hash = "6cf48ad48da3b094b23a00d48a78d78902a689be"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -576,9 +1319,9 @@ version = "0.4.4"
 
 [[deps.Accessors]]
 deps = ["Compat", "CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "LinearAlgebra", "MacroTools", "Requires", "StaticArrays", "Test"]
-git-tree-sha1 = "4a98a9491dd44348664c371998a75074a6938145"
+git-tree-sha1 = "beabc31fa319f9de4d16372bff31b4801e43d32c"
 uuid = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
-version = "0.1.27"
+version = "0.1.28"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra"]
@@ -610,6 +1353,18 @@ version = "7.1.0"
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 
+[[deps.AxisAlgorithms]]
+deps = ["LinearAlgebra", "Random", "SparseArrays", "WoodburyMatrices"]
+git-tree-sha1 = "66771c8d21c8ff5e3a93379480a2307ac36863f7"
+uuid = "13072b0f-2c55-5437-9ae7-d433b7a33950"
+version = "1.0.1"
+
+[[deps.AxisArrays]]
+deps = ["Dates", "IntervalSets", "IterTools", "RangeArrays"]
+git-tree-sha1 = "1dd4d9f5beebac0c03446918741b1a03dc5e5788"
+uuid = "39de3d68-74b9-583c-8d2d-e117c070f3a9"
+version = "0.4.6"
+
 [[deps.BFloat16s]]
 deps = ["LinearAlgebra", "Printf", "Random", "Test"]
 git-tree-sha1 = "dbf84058d0a8cbbadee18d25cf606934b22d7c66"
@@ -636,7 +1391,7 @@ uuid = "9718e550-a3fa-408a-8086-8db961cd8217"
 version = "0.1.1"
 
 [[deps.BetaZero]]
-deps = ["BSON", "DataStructures", "Distributed", "Flux", "GaussianProcesses", "LinearAlgebra", "MCTS", "POMDPTools", "POMDPs", "Parameters", "Plots", "ProgressMeter", "Random", "Statistics", "StatsBase", "Suppressor", "UnicodePlots"]
+deps = ["BSON", "DataStructures", "Distributed", "Distributions", "Flux", "GaussianProcesses", "LinearAlgebra", "MCTS", "Optim", "POMDPTools", "POMDPs", "Parameters", "Plots", "ProgressMeter", "Random", "Statistics", "StatsBase", "Suppressor", "UnicodePlots"]
 path = "../../home/mossr/src/scerf/BetaZero"
 uuid = "c2a2f090-4363-4bef-a985-c7cb903c4681"
 version = "0.1.0"
@@ -693,11 +1448,17 @@ git-tree-sha1 = "4b859a208b2397a7a623a03449e4636bdb17bcf2"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.16.1+1"
 
+[[deps.CatIndices]]
+deps = ["CustomUnitRanges", "OffsetArrays"]
+git-tree-sha1 = "a0f80a09780eed9b1d106a1bf62041c2efc995bc"
+uuid = "aafaddc9-749c-510e-ac4f-586e18779b91"
+version = "0.2.2"
+
 [[deps.ChainRules]]
 deps = ["Adapt", "ChainRulesCore", "Compat", "Distributed", "GPUArraysCore", "IrrationalConstants", "LinearAlgebra", "Random", "RealDot", "SparseArrays", "Statistics", "StructArrays"]
-git-tree-sha1 = "fdde4d8a31cf82b1d136cf6cb53924e8744a832b"
+git-tree-sha1 = "7d20c2fb8ab838e41069398685e7b6b5f89ed85b"
 uuid = "082447d4-558c-5d27-93f4-14fc19e9eca2"
-version = "1.47.0"
+version = "1.48.0"
 
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra", "SparseArrays"]
@@ -710,6 +1471,12 @@ deps = ["ChainRulesCore", "LinearAlgebra", "Test"]
 git-tree-sha1 = "485193efd2176b88e6622a39a246f8c5b600e74e"
 uuid = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
 version = "0.1.6"
+
+[[deps.Clustering]]
+deps = ["Distances", "LinearAlgebra", "NearestNeighbors", "Printf", "Random", "SparseArrays", "Statistics", "StatsBase"]
+git-tree-sha1 = "64df3da1d2a26f4de23871cd1b6482bb68092bd5"
+uuid = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
+version = "0.14.3"
 
 [[deps.CodeTracking]]
 deps = ["InteractiveUtils", "UUIDs"]
@@ -781,11 +1548,16 @@ git-tree-sha1 = "455419f7e328a1a2493cabc6428d79e951349769"
 uuid = "a33af91c-f02d-484b-be07-31d278c5ca2b"
 version = "0.1.1"
 
+[[deps.ComputationalResources]]
+git-tree-sha1 = "52cb3ec90e8a8bea0e62e275ba577ad0f74821f7"
+uuid = "ed09eef8-17a6-5b46-8889-db040fac31e3"
+version = "0.3.2"
+
 [[deps.ConstructionBase]]
 deps = ["LinearAlgebra"]
-git-tree-sha1 = "fb21ddd70a051d882a1686a5a550990bbe371a95"
+git-tree-sha1 = "89a9db8d28102b094992472d333674bd1a83ce2a"
 uuid = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-version = "1.4.1"
+version = "1.5.1"
 
 [[deps.ContextVariablesX]]
 deps = ["Compat", "Logging", "UUIDs"]
@@ -798,10 +1570,21 @@ git-tree-sha1 = "d05d9e7b7aedff4e5b51a029dced05cfb6125781"
 uuid = "d38c429a-6771-53c6-b99e-75d170b6e991"
 version = "0.6.2"
 
+[[deps.CoordinateTransformations]]
+deps = ["LinearAlgebra", "StaticArrays"]
+git-tree-sha1 = "681ea870b918e7cff7111da58791d7f718067a19"
+uuid = "150eb455-5306-5404-9cee-2592286d6298"
+version = "0.6.2"
+
 [[deps.Crayons]]
 git-tree-sha1 = "249fe38abf76d48563e2f4556bebd215aa317e15"
 uuid = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
 version = "4.1.1"
+
+[[deps.CustomUnitRanges]]
+git-tree-sha1 = "1a3f97f907e6dd8983b744d2642651bb162a3f7a"
+uuid = "dc8bdbbb-1ca9-579f-8c36-e416f6a65cce"
+version = "1.0.2"
 
 [[deps.D3Trees]]
 deps = ["AbstractTrees", "HTTP", "JSON", "Random", "Sockets"]
@@ -863,10 +1646,10 @@ uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
 version = "1.13.0"
 
 [[deps.Distances]]
-deps = ["LinearAlgebra", "SparseArrays", "Statistics", "StatsAPI"]
-git-tree-sha1 = "3258d0659f812acde79e8a74b11f17ac06d0ca04"
+deps = ["LinearAlgebra", "Statistics"]
+git-tree-sha1 = "a5b88815e6984e9f3256b6ca0dc63109b16a506f"
 uuid = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
-version = "0.10.7"
+version = "0.9.2"
 
 [[deps.Distributed]]
 deps = ["Random", "Serialization", "Sockets"]
@@ -924,6 +1707,24 @@ git-tree-sha1 = "74faea50c1d007c85837327f6775bea60b5492dd"
 uuid = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
 version = "4.4.2+2"
 
+[[deps.FFTViews]]
+deps = ["CustomUnitRanges", "FFTW"]
+git-tree-sha1 = "cbdf14d1e8c7c8aacbe8b19862e0179fd08321c2"
+uuid = "4f61f5a4-77b1-5117-aa51-3ab5ef4ef0cd"
+version = "0.3.2"
+
+[[deps.FFTW]]
+deps = ["AbstractFFTs", "FFTW_jll", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
+git-tree-sha1 = "90630efff0894f8142308e334473eba54c433549"
+uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+version = "1.5.0"
+
+[[deps.FFTW_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "c6033cc3892d0ef5bb9cd29b7f2f0331ea5184ea"
+uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
+version = "3.3.10+0"
+
 [[deps.FLoops]]
 deps = ["BangBang", "Compat", "FLoopsBase", "InitialValues", "JuliaVariables", "MLStyle", "Serialization", "Setfield", "Transducers"]
 git-tree-sha1 = "ffb97765602e3cbe59a0589d237bf07f245a8576"
@@ -941,6 +1742,12 @@ deps = ["LinearAlgebra", "SpecialFunctions", "StaticArrays"]
 git-tree-sha1 = "58d83dd5a78a36205bdfddb82b1bb67682e64487"
 uuid = "442a2c76-b920-505d-bb47-c5924d526838"
 version = "0.4.9"
+
+[[deps.FileIO]]
+deps = ["Pkg", "Requires", "UUIDs"]
+git-tree-sha1 = "7be5f99f7d15578798f338f5433b6c432ea8037b"
+uuid = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+version = "1.16.0"
 
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
@@ -1068,11 +1875,23 @@ git-tree-sha1 = "9b02998aba7bf074d14de89f9d37ca24a1a0b046"
 uuid = "78b55507-aeef-58d4-861c-77aaff3498b1"
 version = "0.21.0+0"
 
+[[deps.Ghostscript_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "43ba3d3c82c18d88471cfd2924931658838c9d8f"
+uuid = "61579ee1-b43e-5ca0-a5da-69d92c66a64b"
+version = "9.55.0+4"
+
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "d3b3624125c1474292d0d8ed0f65554ac37ddb23"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
 version = "2.74.0+2"
+
+[[deps.Graphics]]
+deps = ["Colors", "LinearAlgebra", "NaNMath"]
+git-tree-sha1 = "d61890399bc535850c4bf08e4e0d3a7ad0f21cbd"
+uuid = "a2bd30eb-e257-5431-a919-1863eab51364"
+version = "1.1.2"
 
 [[deps.Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1085,6 +1904,12 @@ deps = ["ArnoldiMethod", "Compat", "DataStructures", "Distributed", "Inflate", "
 git-tree-sha1 = "1cf1d7dcb4bc32d7b4a5add4232db3750c27ecb4"
 uuid = "86223c79-3864-5bf0-83f7-82e725a168b6"
 version = "1.8.0"
+
+[[deps.GridInterpolations]]
+deps = ["LinearAlgebra", "Printf", "StaticArrays"]
+git-tree-sha1 = "9f82426be865173d1488fa4ae73999f59a17deaf"
+uuid = "bb4c363b-b914-514b-8517-4eb369bc008a"
+version = "1.1.2"
 
 [[deps.Grisu]]
 git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
@@ -1127,6 +1952,113 @@ git-tree-sha1 = "2af2fe19f0d5799311a6491267a14817ad9fbd20"
 uuid = "7869d1d1-7146-5819-86e3-90919afe41df"
 version = "0.4.8"
 
+[[deps.ImageAxes]]
+deps = ["AxisArrays", "ImageBase", "ImageCore", "Reexport", "SimpleTraits"]
+git-tree-sha1 = "c54b581a83008dc7f292e205f4c409ab5caa0f04"
+uuid = "2803e5a7-5153-5ecf-9a86-9b4c37f5f5ac"
+version = "0.6.10"
+
+[[deps.ImageBase]]
+deps = ["ImageCore", "Reexport"]
+git-tree-sha1 = "b51bb8cae22c66d0f6357e3bcb6363145ef20835"
+uuid = "c817782e-172a-44cc-b673-b171935fbb9e"
+version = "0.1.5"
+
+[[deps.ImageContrastAdjustment]]
+deps = ["ImageCore", "ImageTransformations", "Parameters"]
+git-tree-sha1 = "0d75cafa80cf22026cea21a8e6cf965295003edc"
+uuid = "f332f351-ec65-5f6a-b3d1-319c6670881a"
+version = "0.3.10"
+
+[[deps.ImageCore]]
+deps = ["AbstractFFTs", "ColorVectorSpace", "Colors", "FixedPointNumbers", "Graphics", "MappedArrays", "MosaicViews", "OffsetArrays", "PaddedViews", "Reexport"]
+git-tree-sha1 = "acf614720ef026d38400b3817614c45882d75500"
+uuid = "a09fc81d-aa75-5fe9-8630-4744c3626534"
+version = "0.9.4"
+
+[[deps.ImageDistances]]
+deps = ["Distances", "ImageCore", "ImageMorphology", "LinearAlgebra", "Statistics"]
+git-tree-sha1 = "b1798a4a6b9aafb530f8f0c4a7b2eb5501e2f2a3"
+uuid = "51556ac3-7006-55f5-8cb3-34580c88182d"
+version = "0.2.16"
+
+[[deps.ImageFiltering]]
+deps = ["CatIndices", "ComputationalResources", "DataStructures", "FFTViews", "FFTW", "ImageBase", "ImageCore", "LinearAlgebra", "OffsetArrays", "Reexport", "SnoopPrecompile", "SparseArrays", "StaticArrays", "Statistics", "TiledIteration"]
+git-tree-sha1 = "f265e53558fbbf23e0d54e4fab7106c0f2a9e576"
+uuid = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
+version = "0.7.3"
+
+[[deps.ImageIO]]
+deps = ["FileIO", "IndirectArrays", "JpegTurbo", "LazyModules", "Netpbm", "OpenEXR", "PNGFiles", "QOI", "Sixel", "TiffImages", "UUIDs"]
+git-tree-sha1 = "342f789fd041a55166764c351da1710db97ce0e0"
+uuid = "82e4d734-157c-48bb-816b-45c225c6df19"
+version = "0.6.6"
+
+[[deps.ImageMagick]]
+deps = ["FileIO", "ImageCore", "ImageMagick_jll", "InteractiveUtils", "Libdl", "Pkg", "Random"]
+git-tree-sha1 = "5bc1cb62e0c5f1005868358db0692c994c3a13c6"
+uuid = "6218d12a-5da1-5696-b52f-db25d2ecc6d1"
+version = "1.2.1"
+
+[[deps.ImageMagick_jll]]
+deps = ["Artifacts", "Ghostscript_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pkg", "Zlib_jll", "libpng_jll"]
+git-tree-sha1 = "124626988534986113cfd876e3093e4a03890f58"
+uuid = "c73af94c-d91f-53ed-93a7-00f77d67a9d7"
+version = "6.9.12+3"
+
+[[deps.ImageMetadata]]
+deps = ["AxisArrays", "ImageAxes", "ImageBase", "ImageCore"]
+git-tree-sha1 = "36cbaebed194b292590cba2593da27b34763804a"
+uuid = "bc367c6b-8a6b-528e-b4bd-a4b897500b49"
+version = "0.9.8"
+
+[[deps.ImageMorphology]]
+deps = ["ImageCore", "LinearAlgebra", "Requires", "TiledIteration"]
+git-tree-sha1 = "e7c68ab3df4a75511ba33fc5d8d9098007b579a8"
+uuid = "787d08f9-d448-5407-9aad-5290dd7ab264"
+version = "0.3.2"
+
+[[deps.ImageQualityIndexes]]
+deps = ["ImageContrastAdjustment", "ImageCore", "ImageDistances", "ImageFiltering", "LazyModules", "OffsetArrays", "SnoopPrecompile", "Statistics"]
+git-tree-sha1 = "5985d467623f106523ed8351f255642b5141e7be"
+uuid = "2996bd0c-7a13-11e9-2da2-2f5ce47296a9"
+version = "0.3.4"
+
+[[deps.ImageSegmentation]]
+deps = ["Clustering", "DataStructures", "Distances", "Graphs", "ImageCore", "ImageFiltering", "ImageMorphology", "LinearAlgebra", "MetaGraphs", "RegionTrees", "SimpleWeightedGraphs", "StaticArrays", "Statistics"]
+git-tree-sha1 = "fb0b597b4928e29fed0597724cfbb5940974f8ca"
+uuid = "80713f31-8817-5129-9cf8-209ff8fb23e1"
+version = "1.8.0"
+
+[[deps.ImageShow]]
+deps = ["Base64", "ColorSchemes", "FileIO", "ImageBase", "ImageCore", "OffsetArrays", "StackViews"]
+git-tree-sha1 = "ce28c68c900eed3cdbfa418be66ed053e54d4f56"
+uuid = "4e3cecfd-b093-5904-9786-8bbb286a6a31"
+version = "0.3.7"
+
+[[deps.ImageTransformations]]
+deps = ["AxisAlgorithms", "ColorVectorSpace", "CoordinateTransformations", "ImageBase", "ImageCore", "Interpolations", "OffsetArrays", "Rotations", "StaticArrays"]
+git-tree-sha1 = "8717482f4a2108c9358e5c3ca903d3a6113badc9"
+uuid = "02fcd773-0e25-5acc-982a-7f6622650795"
+version = "0.9.5"
+
+[[deps.Images]]
+deps = ["Base64", "FileIO", "Graphics", "ImageAxes", "ImageBase", "ImageContrastAdjustment", "ImageCore", "ImageDistances", "ImageFiltering", "ImageIO", "ImageMagick", "ImageMetadata", "ImageMorphology", "ImageQualityIndexes", "ImageSegmentation", "ImageShow", "ImageTransformations", "IndirectArrays", "IntegralArrays", "Random", "Reexport", "SparseArrays", "StaticArrays", "Statistics", "StatsBase", "TiledIteration"]
+git-tree-sha1 = "03d1301b7ec885b266c0f816f338368c6c0b81bd"
+uuid = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+version = "0.25.2"
+
+[[deps.Imath_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "87f7662e03a649cffa2e05bf19c303e168732d3e"
+uuid = "905a6f67-0a94-5f89-b386-d35d92009cd1"
+version = "3.1.2+0"
+
+[[deps.IndirectArrays]]
+git-tree-sha1 = "012e604e1c7458645cb8b436f8fba789a51b257f"
+uuid = "9b13fd28-a010-5f03-acff-a1bbcff69959"
+version = "1.0.0"
+
 [[deps.Inflate]]
 git-tree-sha1 = "5cd07aab533df5170988219191dfad0519391428"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
@@ -1148,9 +2080,33 @@ git-tree-sha1 = "9cc2baf75c6d09f9da536ddf58eb2f29dedaf461"
 uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
 version = "1.4.0"
 
+[[deps.IntegralArrays]]
+deps = ["ColorTypes", "FixedPointNumbers", "IntervalSets"]
+git-tree-sha1 = "be8e690c3973443bec584db3346ddc904d4884eb"
+uuid = "1d092043-8f09-5a30-832f-7509e371ab51"
+version = "0.1.5"
+
+[[deps.IntelOpenMP_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "d979e54b71da82f3a65b62553da4fc3d18c9004c"
+uuid = "1d5cc7b8-4909-519e-a0f8-d0f5ad9712d0"
+version = "2018.0.3+2"
+
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+
+[[deps.Interpolations]]
+deps = ["Adapt", "AxisAlgorithms", "ChainRulesCore", "LinearAlgebra", "OffsetArrays", "Random", "Ratios", "Requires", "SharedArrays", "SparseArrays", "StaticArrays", "WoodburyMatrices"]
+git-tree-sha1 = "721ec2cf720536ad005cb38f50dbba7b02419a15"
+uuid = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+version = "0.14.7"
+
+[[deps.IntervalSets]]
+deps = ["Dates", "Random", "Statistics"]
+git-tree-sha1 = "16c0cc91853084cb5f58a78bd209513900206ce6"
+uuid = "8197267c-284f-5f27-9208-e0e47529a953"
+version = "0.7.4"
 
 [[deps.InverseFunctions]]
 deps = ["Test"]
@@ -1178,6 +2134,12 @@ git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
 uuid = "82899510-4779-5014-852e-03e436cf321d"
 version = "1.0.0"
 
+[[deps.JLD2]]
+deps = ["FileIO", "MacroTools", "Mmap", "OrderedCollections", "Pkg", "Printf", "Reexport", "TranscodingStreams", "UUIDs"]
+git-tree-sha1 = "c3244ef42b7d4508c638339df1bdbf4353e144db"
+uuid = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+version = "0.4.30"
+
 [[deps.JLFzf]]
 deps = ["Pipe", "REPL", "Random", "fzf_jll"]
 git-tree-sha1 = "f377670cda23b6b7c1c0b3893e37451c5c1a2185"
@@ -1195,6 +2157,12 @@ deps = ["Dates", "Mmap", "Parsers", "Unicode"]
 git-tree-sha1 = "3c837543ddb02250ef42f4738347454f95079d4e"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 version = "0.21.3"
+
+[[deps.JpegTurbo]]
+deps = ["CEnum", "FileIO", "ImageCore", "JpegTurbo_jll", "TOML"]
+git-tree-sha1 = "106b6aa272f294ba47e96bd3acbabdc0407b5c60"
+uuid = "b835a17e-a41a-41e7-81f0-2f016b05efe0"
+version = "0.1.2"
 
 [[deps.JpegTurbo_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1258,6 +2226,11 @@ version = "0.15.18"
 [[deps.LazyArtifacts]]
 deps = ["Artifacts", "Pkg"]
 uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
+
+[[deps.LazyModules]]
+git-tree-sha1 = "a560dd966b386ac9ae60bdd3a3d3a326062d3c3e"
+uuid = "8cdb02fc-e678-4876-92c5-9defec4f444e"
+version = "0.3.1"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -1345,6 +2318,18 @@ version = "7.2.0"
 deps = ["Libdl", "libblastrampoline_jll"]
 uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
+[[deps.LocalApproximationValueIteration]]
+deps = ["LocalFunctionApproximation", "POMDPLinter", "POMDPTools", "POMDPs", "Printf", "Random"]
+git-tree-sha1 = "30df0ee83bb17c6c541b18375481d7ce2b17f909"
+uuid = "a40420fb-f401-52da-a663-f502e5b95060"
+version = "0.4.3"
+
+[[deps.LocalFunctionApproximation]]
+deps = ["Distances", "GridInterpolations", "NearestNeighbors"]
+git-tree-sha1 = "0a6fc6de62ca396ed528a816ad26cdba640221e5"
+uuid = "db97f5ab-fc25-52dd-a8f9-02a257c35074"
+version = "1.1.0"
+
 [[deps.LogExpFunctions]]
 deps = ["ChainRulesCore", "ChangesOfVariables", "DocStringExtensions", "InverseFunctions", "IrrationalConstants", "LinearAlgebra"]
 git-tree-sha1 = "0a1b7c2863e44523180fdb3146534e265a91870b"
@@ -1377,6 +2362,12 @@ git-tree-sha1 = "65f28ad4b594aebe22157d6fac869786a255b7eb"
 uuid = "6c6e2e6c-3030-632d-7369-2d6c69616d65"
 version = "0.1.4"
 
+[[deps.MKL_jll]]
+deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "Pkg"]
+git-tree-sha1 = "2ce8695e1e699b68702c03402672a69f54b8aca9"
+uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
+version = "2022.2.0+0"
+
 [[deps.MLStyle]]
 git-tree-sha1 = "bc38dff0548128765760c79eb7388a4b37fae2c8"
 uuid = "d8e11817-5142-5d16-987a-aa16d5891078"
@@ -1393,6 +2384,11 @@ deps = ["Markdown", "Random"]
 git-tree-sha1 = "42324d08725e200c23d4dfb549e0d5d89dede2d2"
 uuid = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 version = "0.5.10"
+
+[[deps.MappedArrays]]
+git-tree-sha1 = "e8b359ef06ec72e8c030463fe02efe5527ee5142"
+uuid = "dbb5928d-eab1-5f90-85c2-b9b0edb7c900"
+version = "0.4.1"
 
 [[deps.MarchingCubes]]
 deps = ["SnoopPrecompile", "StaticArrays"]
@@ -1420,6 +2416,12 @@ git-tree-sha1 = "c13304c81eec1ed3af7fc20e75fb6b26092a1102"
 uuid = "442fdcdd-2543-5da2-b0f3-8c86c306513e"
 version = "0.3.2"
 
+[[deps.MetaGraphs]]
+deps = ["Graphs", "JLD2", "Random"]
+git-tree-sha1 = "1130dbe1d5276cb656f6e1094ce97466ed700e5a"
+uuid = "626554b9-1ddb-594c-aa3c-2596fe9399a5"
+version = "0.7.2"
+
 [[deps.MicroCollections]]
 deps = ["BangBang", "InitialValues", "Setfield"]
 git-tree-sha1 = "4d5917a26ca33c66c8e5ca3247bd163624d35493"
@@ -1434,6 +2436,12 @@ version = "1.1.0"
 
 [[deps.Mmap]]
 uuid = "a63ad114-7e13-5084-954f-fe012c677804"
+
+[[deps.MosaicViews]]
+deps = ["MappedArrays", "OffsetArrays", "PaddedViews", "StackViews"]
+git-tree-sha1 = "7b86a5d4d70a9f5cdf2dacb3cbe6d251d1a61dbe"
+uuid = "e94cdb99-869f-56ef-bcf0-1ae2bcbe0389"
+version = "0.3.4"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
@@ -1474,9 +2482,27 @@ git-tree-sha1 = "90914795fc59df44120fe3fff6742bb0d7adb1d0"
 uuid = "d9ec5142-1e00-5aa0-9d6a-321866360f50"
 version = "0.14.3"
 
+[[deps.NearestNeighbors]]
+deps = ["Distances", "StaticArrays"]
+git-tree-sha1 = "2c3726ceb3388917602169bed973dbc97f1b51a8"
+uuid = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
+version = "0.4.13"
+
+[[deps.Netpbm]]
+deps = ["FileIO", "ImageCore", "ImageMetadata"]
+git-tree-sha1 = "5ae7ca23e13855b3aba94550f26146c01d259267"
+uuid = "f09324ee-3d7c-5217-9330-fc30815ba969"
+version = "1.1.0"
+
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
 version = "1.2.0"
+
+[[deps.OffsetArrays]]
+deps = ["Adapt"]
+git-tree-sha1 = "82d7c9e310fe55aa54996e6f7f94674e2a38fcb4"
+uuid = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
+version = "1.12.9"
 
 [[deps.Ogg_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1494,6 +2520,18 @@ version = "0.2.3"
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
 version = "0.3.20+0"
+
+[[deps.OpenEXR]]
+deps = ["Colors", "FileIO", "OpenEXR_jll"]
+git-tree-sha1 = "327f53360fdb54df7ecd01e96ef1983536d1e633"
+uuid = "52e1d378-f018-4a11-a4be-720524705ac7"
+version = "0.3.2"
+
+[[deps.OpenEXR_jll]]
+deps = ["Artifacts", "Imath_jll", "JLLWrappers", "Libdl", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "923319661e9a22712f24596ce81c54fc0366f304"
+uuid = "18a262bb-aa17-5467-a713-aee519bc75cb"
+version = "3.1.1+0"
 
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -1526,9 +2564,9 @@ version = "1.7.4"
 
 [[deps.Optimisers]]
 deps = ["ChainRulesCore", "Functors", "LinearAlgebra", "Random", "Statistics"]
-git-tree-sha1 = "e657acef119cc0de2a8c0762666d3b64727b053b"
+git-tree-sha1 = "e5a1825d3d53aa4ad4fb42bd4927011ad4a78c3d"
 uuid = "3bd65402-5787-11e9-1adc-39752487f4e2"
-version = "0.2.14"
+version = "0.2.15"
 
 [[deps.Opus_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1551,6 +2589,12 @@ deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse", "Test"]
 git-tree-sha1 = "95a4038d1011dfdbde7cecd2ad0ac411e53ab1bc"
 uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
 version = "0.10.1"
+
+[[deps.PNGFiles]]
+deps = ["Base64", "CEnum", "ImageCore", "IndirectArrays", "OffsetArrays", "libpng_jll"]
+git-tree-sha1 = "f809158b27eba0c18c269cf2a2be6ed751d3e81d"
+uuid = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
+version = "0.3.17"
 
 [[deps.POMDPLinter]]
 deps = ["Logging"]
@@ -1575,6 +2619,12 @@ deps = ["Distributions", "Graphs", "NamedTupleTools", "POMDPLinter", "Pkg", "Ran
 git-tree-sha1 = "9ab2df9294d0b23def1e5274a0ebf691adc8f782"
 uuid = "a93abf59-7444-517b-a68a-c42f96afdd7d"
 version = "0.9.5"
+
+[[deps.PaddedViews]]
+deps = ["OffsetArrays"]
+git-tree-sha1 = "03a7a85b76381a3d04c7a1656039197e70eda03d"
+uuid = "5432bcbf-9aad-5242-b902-cca2824c8663"
+version = "0.5.11"
 
 [[deps.Parameters]]
 deps = ["OrderedCollections", "UnPack"]
@@ -1609,6 +2659,12 @@ version = "0.40.1+0"
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 version = "1.8.0"
+
+[[deps.PkgVersion]]
+deps = ["Pkg"]
+git-tree-sha1 = "f6cf8e7944e50901594838951729a1861e668cb8"
+uuid = "eebad327-c553-4316-9ea0-9fa01ccd7688"
+version = "0.3.2"
 
 [[deps.PlotThemes]]
 deps = ["PlotUtils", "Statistics"]
@@ -1679,6 +2735,12 @@ git-tree-sha1 = "d7a7aef8f8f2d537104f170139553b14dfe39fe9"
 uuid = "92933f4c-e287-5a05-a399-4b506db050ca"
 version = "1.7.2"
 
+[[deps.QOI]]
+deps = ["ColorTypes", "FileIO", "FixedPointNumbers"]
+git-tree-sha1 = "18e8f4d1426e965c7b532ddd260599e1510d26ce"
+uuid = "4b34888f-f399-49d4-9bb3-47ed5cae4e65"
+version = "1.0.0"
+
 [[deps.Qt5Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Pkg", "Xorg_libXext_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "xkbcommon_jll"]
 git-tree-sha1 = "0c03844e2231e12fda4d0086fd7cbe4098ee8dc5"
@@ -1690,6 +2752,12 @@ deps = ["DataStructures", "LinearAlgebra"]
 git-tree-sha1 = "786efa36b7eff813723c4849c90456609cf06661"
 uuid = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 version = "2.8.1"
+
+[[deps.Quaternions]]
+deps = ["LinearAlgebra", "Random", "RealDot"]
+git-tree-sha1 = "da095158bdc8eaccb7890f9884048555ab771019"
+uuid = "94ee1d12-ae83-5a48-8b1c-48b8ff168ae0"
+version = "0.7.4"
 
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
@@ -1710,6 +2778,17 @@ deps = ["Random", "Requires"]
 git-tree-sha1 = "043da614cc7e95c703498a491e2c21f58a2b8111"
 uuid = "e6cf234a-135c-5ec9-84dd-332b85af5143"
 version = "1.5.3"
+
+[[deps.RangeArrays]]
+git-tree-sha1 = "b9039e93773ddcfc828f12aadf7115b4b4d225f5"
+uuid = "b3c3ace0-ae52-54e7-9d0b-2c1406fd6b9d"
+version = "0.3.2"
+
+[[deps.Ratios]]
+deps = ["Requires"]
+git-tree-sha1 = "dc84268fe0e3335a62e315a3a7cf2afa7178a734"
+uuid = "c84ed2f1-dad5-54f0-aa8e-dbefe2724439"
+version = "0.4.3"
 
 [[deps.RealDot]]
 deps = ["LinearAlgebra"]
@@ -1733,6 +2812,12 @@ version = "0.6.11"
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
 version = "1.2.2"
+
+[[deps.RegionTrees]]
+deps = ["IterTools", "LinearAlgebra", "StaticArrays"]
+git-tree-sha1 = "4618ed0da7a251c7f92e869ae1a19c74a7d2a7f9"
+uuid = "dee08c22-ab7f-5625-9660-a9af2021b33f"
+version = "0.3.2"
 
 [[deps.RelocatableFolders]]
 deps = ["SHA", "Scratch"]
@@ -1763,6 +2848,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "6ed52fdd3382cf21947b15e8870ac0ddbff736da"
 uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
 version = "0.4.0+0"
+
+[[deps.Rotations]]
+deps = ["LinearAlgebra", "Quaternions", "Random", "StaticArrays", "Statistics"]
+git-tree-sha1 = "9480500060044fd25a1c341da53f34df7443c2f2"
+uuid = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+version = "1.3.4"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
@@ -1821,6 +2912,18 @@ git-tree-sha1 = "5d7e3f4e11935503d3ecaf7186eac40602e7d231"
 uuid = "699a6c99-e7fa-54fc-8d76-47d257e15c1d"
 version = "0.9.4"
 
+[[deps.SimpleWeightedGraphs]]
+deps = ["Graphs", "LinearAlgebra", "Markdown", "SparseArrays", "Test"]
+git-tree-sha1 = "7d0b07df35fccf9b866a94bcab98822a87a3cb6f"
+uuid = "47aef6b3-ad0c-573a-a1e2-d07658019622"
+version = "1.3.0"
+
+[[deps.Sixel]]
+deps = ["Dates", "FileIO", "ImageCore", "IndirectArrays", "OffsetArrays", "REPL", "libsixel_jll"]
+git-tree-sha1 = "8fb59825be681d451c246a795117f317ecbcaa28"
+uuid = "45858cf5-a6b0-47a3-bbea-62219f50df47"
+version = "0.1.2"
+
 [[deps.SnoopPrecompile]]
 deps = ["Preferences"]
 git-tree-sha1 = "e760a70afdcd461cf01a575947738d359234665c"
@@ -1851,6 +2954,12 @@ deps = ["Setfield", "Test"]
 git-tree-sha1 = "e08a62abc517eb79667d0a29dc08a3b589516bb5"
 uuid = "171d559e-b47b-412a-8079-5efa626c420e"
 version = "0.1.15"
+
+[[deps.StackViews]]
+deps = ["OffsetArrays"]
+git-tree-sha1 = "46e589465204cd0c08b4bd97385e4fa79a0c770c"
+uuid = "cae243ae-269e-4f55-b966-ac2d0dc13c15"
+version = "0.1.1"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
@@ -1937,6 +3046,18 @@ version = "0.1.1"
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
+[[deps.TiffImages]]
+deps = ["ColorTypes", "DataStructures", "DocStringExtensions", "FileIO", "FixedPointNumbers", "IndirectArrays", "Inflate", "Mmap", "OffsetArrays", "PkgVersion", "ProgressMeter", "UUIDs"]
+git-tree-sha1 = "7e6b0e3e571be0b4dd4d2a9a3a83b65c04351ccc"
+uuid = "731e570b-9d59-4bfa-96dc-6df516fadf69"
+version = "0.6.3"
+
+[[deps.TiledIteration]]
+deps = ["OffsetArrays"]
+git-tree-sha1 = "5683455224ba92ef59db72d10690690f4a8dc297"
+uuid = "06e1c1a7-607b-532d-9fad-de7d9aa2abac"
+version = "0.3.1"
+
 [[deps.TimerOutputs]]
 deps = ["ExprTools", "Printf"]
 git-tree-sha1 = "f2fd3f288dfc6f507b0c3a2eb3bac009251e548b"
@@ -2005,6 +3126,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "4528479aa01ee1b3b4cd0e6faef0e04cf16466da"
 uuid = "2381bf8a-dfd0-557d-9999-79630e7b1b91"
 version = "1.25.0+0"
+
+[[deps.WoodburyMatrices]]
+deps = ["LinearAlgebra", "SparseArrays"]
+git-tree-sha1 = "de67fa59e33ad156a590055375a30b23c40299d3"
+uuid = "efce3f68-66dc-5838-9240-27a6d6f5f9b6"
+version = "0.5.5"
 
 [[deps.XML2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Zlib_jll"]
@@ -2208,6 +3335,12 @@ git-tree-sha1 = "94d180a6d2b5e55e447e2d27a29ed04fe79eb30c"
 uuid = "b53b4c65-9356-5827-b1ea-8c7a1a84506f"
 version = "1.6.38+0"
 
+[[deps.libsixel_jll]]
+deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Pkg", "libpng_jll"]
+git-tree-sha1 = "d4f63314c8aa1e48cd22aa0c17ed76cd1ae48c3c"
+uuid = "075b6546-f08a-558a-be8f-8157d0f608a5"
+version = "1.10.3+0"
+
 [[deps.libvorbis_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Ogg_jll", "Pkg"]
 git-tree-sha1 = "b910cb81ef3fe6e78bf6acee440bda86fd6ae00c"
@@ -2255,30 +3388,116 @@ version = "1.4.1+0"
 # ╠═83e53386-1b8f-4308-863a-fe6fcfa933b6
 # ╠═c0f29e13-bdce-4908-9e9a-6001c88e5ed9
 # ╠═1bb8df23-575a-479b-a4ce-3ceb3eb7acbf
+# ╠═8c7e2291-b846-4659-a3bd-f6abacdd3130
 # ╠═6309e3f0-29c9-4963-a2d1-f6fcb5f3ada4
 # ╠═80c2be9e-a242-4e9d-a082-8c61cfe5ae74
+# ╠═3af7e1d4-5664-4e71-a075-5695e649bbfa
+# ╠═243f9939-0d54-457d-be7d-6f0648f4fa63
+# ╟─db354fe2-6fe4-4593-8c8b-9c6bbf6f05e7
 # ╠═fb09d547-377a-4e34-9e5f-87d06a8c12e2
 # ╠═41d937dd-058b-469d-bc1f-7b70e26bf0c4
 # ╠═87c160e9-63f2-4628-b4aa-187e1b85b46d
 # ╠═51afcc23-64d6-4da2-91aa-8fe81d01440b
 # ╠═4408f005-e0bb-4f96-9f7e-38b1d61c7c9b
+# ╟─90c4edd0-0215-47df-ba5b-c645576a69f2
 # ╠═07aa5bc1-0a89-4de5-aba7-b74265b7bbed
 # ╠═03ff8055-8725-4935-8a09-cb1ea6bf6e35
+# ╠═42de9867-be47-44f4-80ec-15a066a45b8c
+# ╠═1208652f-3ab9-4379-b0ba-b80f29977b3c
+# ╠═ac5456ea-4211-480f-90c8-b50b4a28d0b9
 # ╠═769e3159-bf5e-4294-b7b9-9e49a32406a1
 # ╠═42b011d7-268b-4c9f-94d9-bbc4981847c1
+# ╠═8d465a2a-2138-4415-92aa-f0c4c20bdd6d
+# ╠═eb6537de-b4d2-49bd-9a20-529240fa4e98
+# ╠═f105a961-d94e-4c3d-b1d2-6dd077922dc7
 # ╠═812bd7a7-70af-4581-9170-8ce8af05bd14
 # ╠═ae9322da-f369-4f36-9e92-861a1b0f2c4c
 # ╠═ebf5d5bd-6f0e-45ed-af7b-fa06c3140128
 # ╠═c84e0d55-33e3-415e-b108-51efd3a13717
 # ╠═848d0d9c-f036-44a1-8ce4-ba12798cd538
 # ╠═9b4afdca-9c87-4e88-8199-7fa17c2403fe
+# ╠═029202f4-ba86-457a-911e-30f02ef99f47
+# ╠═547c9e31-6372-4625-b1a7-212adb2e5438
+# ╟─c6c3bcb9-ecd0-494b-9fa5-11c35c722396
 # ╠═3bbc44ce-b0b2-4c81-8ec9-d4819bd8ba49
+# ╠═bd73ffa0-3a73-4922-b7a8-3ffc62f8da25
+# ╠═ee234170-f86b-4b03-9256-7cbdc644d74a
+# ╠═1f52fb7c-56e2-4fc4-9c00-b35b523ac51f
+# ╠═56e2593e-cdf0-4cde-830c-09af3daa7e17
+# ╠═8689d008-0a28-45c1-b35c-0f17c990cb5c
+# ╟─30e52cf5-37d4-4b85-908c-43990d6592bd
+# ╠═be289f06-ea10-43d8-9c03-0a14aa1579a4
+# ╠═5565d9e9-bb35-4bb0-91ad-73662e9d6136
+# ╠═4e8af1b8-7b5f-442d-b28b-0b8d7bdf1a7d
+# ╠═ec606b95-cb6c-4a54-8e1d-d1a1881457d9
+# ╠═d75b9ea2-6a15-4e2d-ab78-0eb16ea54b11
+# ╠═c59a36ee-11e6-420c-9c27-16cbe23cd6e6
+# ╠═c6aa050f-646e-4033-98ef-426c774b2bc9
+# ╠═157e9d3c-3a4d-4426-86f3-1d731a8da122
+# ╠═fd432cf8-1e7e-475b-9c41-46d18ffe2335
+# ╠═3b2cffc2-1f52-453e-a244-a3603c829564
+# ╠═007c03ca-8a6e-414f-89bd-7fa29fdbf540
+# ╠═1af2cbfe-4ccf-4b4e-a253-ab6b63d037f1
+# ╠═3aae1c42-4092-425f-8086-cbe0518a2692
+# ╠═609d9262-10b9-4e9e-9bda-5ad50338ac62
+# ╠═8ab1e3f5-710c-4ecf-9cc8-c1e2d914a011
+# ╠═ac56db3d-ea72-459e-a072-920edd03cb67
+# ╠═40b599eb-e068-4faf-b54e-6dca4896d4a2
 # ╠═4c81fcc5-b50b-4ecd-a0f4-f3ddfe3fad19
+# ╠═1515aa19-f8b5-4d26-93a8-3afd3e144ad1
+# ╠═70b0c991-ca46-4434-ac21-4f7785755cb4
+# ╟─828477f3-d19b-49c2-9827-2cc2d86233e6
+# ╟─47fb1fc3-dbeb-4696-ae7a-d0f049c3ccf3
+# ╠═598bf115-667e-49e5-bdad-bcef4e3e1cbc
+# ╠═7ef35aa9-8558-40aa-abee-1f3b671004c0
+# ╠═35c24d73-3c31-4d8b-9ab3-3acc359911d7
+# ╠═bfa256df-3c81-4d55-8384-aa277ea3a645
+# ╠═98b53fd7-d853-4869-849b-e6875ab89c5d
+# ╠═63364798-48c4-4a7b-8f91-29bda69307f1
+# ╠═9c523eb3-94ce-4fe6-a241-b9fa7d1df25b
+# ╠═05d7ecc1-34c4-4b34-bd3b-4cb3ad0267b7
+# ╠═1e5d06fe-7036-4a13-83ec-7cf301573c25
+# ╠═f60f4c7a-9b4b-48c2-921b-0fa4214ba435
+# ╠═bc965027-5da1-4377-9ed5-e72b9452d526
+# ╠═54b15814-9d64-4799-bdfb-514e2a3e48bb
+# ╠═bb851367-0421-4e36-b20b-d11fc57874b5
+# ╠═e6732dc1-ab93-4d61-b215-168cbb00c0ee
+# ╠═ff8d9df0-7635-4f9e-a3ee-c279977f8173
+# ╠═86f1ed3f-d58a-44bf-ba6c-dbb2b04b4e8c
 # ╠═64f10375-ad0b-4640-b117-fe96bf1ea9e1
+# ╠═0dea654f-e4de-4ecf-8ad4-ca2ec76136c9
+# ╠═2bd13b69-31fc-4885-a5f5-d95457873445
+# ╠═8c6f978c-afe6-481e-a52d-63fb597737d5
+# ╠═b0caab16-2b08-4683-b14f-ba3bcf3275ef
+# ╠═e84ca904-a339-4d43-a3ae-41988868ecee
+# ╠═f278d28d-ccd0-411a-a74e-fbaa4efca965
+# ╠═df1ca98b-68a2-413d-9253-fe709d463ce9
+# ╠═f9f24938-4e9e-46bf-926a-646c937e48e2
+# ╟─c5591821-7615-4351-9a01-12c82efb746f
+# ╠═8b172603-92f0-4750-823e-02fc61eeaa6b
+# ╠═1d309991-1c38-40e3-874a-884dc83709da
+# ╠═2a06238b-06ca-453d-a797-162f183cd869
+# ╟─5658517d-5b0e-4a58-982d-e7cb08b3522e
+# ╠═38e1c560-beaf-4c2e-8f5c-d6b08a4d3273
+# ╠═cd4dab5b-a7cd-4e07-b6aa-98d1220ad0c8
 # ╠═0feeb06c-3f6d-4ec7-b795-9a1c52fc0e69
+# ╟─11d10167-0a74-4153-b618-52ae07889324
 # ╠═4f5e76f2-97d3-418e-a1e5-2fc558fbddcb
 # ╠═7f8ae7e3-8144-4d38-b398-edecf5fc396f
 # ╠═607ed6b8-af59-402a-b9ba-6786bb3f248c
+# ╟─1bea8485-6ccd-4108-a97d-9669f6669da8
+# ╠═14ea3b14-a718-43de-a126-7910fb4e02c1
+# ╠═2f598533-6de2-4029-b3f9-7a2904c8d766
+# ╠═f98dd3af-2af8-40b1-b71e-d8e842b411c3
+# ╠═74f2b6ec-4e5a-4887-8e31-3cd41d54b375
+# ╠═ccf70808-5103-4279-846d-237f888fba01
+# ╠═6d822d41-f49a-4d11-8266-e41a02f5aaa1
+# ╠═2acb5d21-e5b4-446c-80d0-ee98f3bbd4a7
+# ╠═dd9e1fcc-79c1-4452-b032-51f918303f17
+# ╠═e20fbafd-0f76-4862-a1b3-a7fff41b47b1
+# ╠═ad45a730-5950-43b6-ba6b-82ff9373c59d
+# ╠═73e8ca7f-cf0a-431f-8625-7e317224bed4
+# ╟─6f7bc73f-3961-45af-90ff-002e02dbe9eb
 # ╠═9186d51c-dac7-4b21-b4eb-3cd724bb1a3e
 # ╠═ce006bd6-d691-4efb-b740-4ddc258416c4
 # ╠═f97f9786-5cc7-478f-997c-2fb26053a504
@@ -2297,17 +3516,57 @@ version = "1.4.1+0"
 # ╠═6213273f-0417-4cbc-9eff-9add06948401
 # ╠═8d422b96-b8ef-4d36-ab80-41d404cf4ff0
 # ╟─6572e23c-d4f4-4803-8034-6613fdf18960
-# ╠═ce515ed9-bac3-4b48-977f-c94937eebe8f
 # ╠═bda2e95f-b22f-4ba1-95ba-f973669e31d9
+# ╠═47057cbd-508c-48d8-a2aa-59f3a5296481
+# ╠═2a860403-efcf-40d9-81a0-bd0f2b76081a
+# ╠═ac665280-9b69-4eb4-b4ca-e794fb3da01b
+# ╠═c455f35d-25d7-44d7-90dd-a2cb9c42020c
+# ╠═b4a20910-2b1c-4697-9140-eb619fffbe40
+# ╠═f2e9c419-d2ca-4bc8-8f94-2115f192decf
+# ╠═8dca08c1-e469-44a1-95ad-af4c76ba2729
+# ╠═b2c7630b-3673-4158-9e91-4fbd2f471d08
+# ╠═92d0d38f-9fb6-4c08-b569-6b336d8fba8a
+# ╠═32c79abb-122c-421a-831e-28b4faaad279
+# ╠═c6a3bcf0-c7f4-468a-9884-f7fe4231ab5d
+# ╠═ce515ed9-bac3-4b48-977f-c94937eebe8f
+# ╠═42999b4d-7b41-41b8-b719-2e375d890c97
+# ╠═2694d4ba-5eaf-4bf7-a9eb-a9e407163cf1
+# ╠═7b237f3d-6898-4c57-b672-7449f8a485b0
+# ╠═bcd84550-5656-4997-a4ce-1167852c7eec
+# ╠═f7a13b63-f7f5-41cf-bad4-7d8a5f588c6d
+# ╠═8f196424-1b11-4ee5-bc58-ee5284fdf098
+# ╠═d9acdd13-cb52-4ea3-a493-2534f43e236a
+# ╠═894ee284-a417-4017-9696-6f741706f179
+# ╠═c32085e0-8f24-4e87-bedc-d18e8197e575
+# ╠═dc49a10c-4648-4e8d-bc85-cc6cfc073c5c
+# ╠═7d7670e3-d07b-4175-b399-68327a1c3b03
+# ╠═886e5e3c-ec60-4da3-bf49-18e811578853
+# ╠═59ca30e3-7397-4245-8985-c25795e46750
+# ╠═8d818d7f-0f98-4131-a723-12fd164d218f
+# ╠═31684f7c-f5ad-4ea9-993e-cd19c38a8eae
 # ╠═fa79f064-81df-476c-a3fb-5271bee3cd5a
 # ╠═410bdb7a-a201-47fb-9a92-9910b5b93ca0
-# ╠═59ca30e3-7397-4245-8985-c25795e46750
-# ╟─d4d9e5b3-3f6c-4936-9592-8b08ed02a09e
-# ╠═88362011-8e3b-45de-b451-57265459aa71
+# ╠═8f0506e3-30df-4093-afa1-cb035673cf01
+# ╠═c5332871-a0d3-4586-8be3-643fcd9bb392
+# ╠═00a84f88-9d7e-4344-b813-f66b6a70c394
+# ╠═f067942f-86a6-4edc-bcf0-78fecb6455a0
+# ╟─0cf1d477-d750-4a45-8bd7-7a3c061c6532
+# ╠═5be544ba-d05f-4e4e-b88e-3f7cc1ee79c4
 # ╠═6b2514dd-4312-4030-b4b0-d26d6f936c5d
 # ╠═46166104-92e8-4f5a-bcd4-35435f18aa63
+# ╠═b3e3c159-31f8-4d3f-b062-43dc4b940db6
+# ╠═12458ba9-10ed-4ebc-88fd-140f86b79920
+# ╠═a8782a5e-9a51-470b-9d89-c8188c04dc12
+# ╠═31a99d07-aa61-46e1-827f-05d3023d0a09
+# ╠═93be835a-a3e0-4147-a2ad-3a86d93a34b5
+# ╠═980c2630-b66b-423f-8153-3a979c16bdf6
+# ╠═0255a5cc-7a77-42dd-b86e-b9e1d2c88079
+# ╠═61284855-5286-487a-b6b0-f8a24adb28a3
+# ╟─d4d9e5b3-3f6c-4936-9592-8b08ed02a09e
+# ╟─e56a6370-00e5-4305-8062-8106dc2df9cb
+# ╠═88362011-8e3b-45de-b451-57265459aa71
+# ╠═87d7505d-2edb-401d-ac2e-9386f5ccad5f
 # ╠═baa3ab4f-be38-4851-a851-4a37b38a3f66
-# ╠═e56a6370-00e5-4305-8062-8106dc2df9cb
 # ╠═fc28e360-a595-46e3-ba32-d917ce0b9f63
 # ╠═2e512cda-bba3-4cc9-9110-132ffa37e9e5
 # ╠═1ae1a1e8-aaec-47b2-9ced-6fd8afc48b9e
@@ -2320,10 +3579,29 @@ version = "1.4.1+0"
 # ╠═ddbf075e-539e-49a7-8a1b-a8e7b6eb644f
 # ╠═1fa63234-37e4-4b12-a064-6a55b2ee0b67
 # ╟─047c2c69-d662-4dba-b8b6-c25167178ecb
+# ╠═0f8578cd-37f5-4ecd-b9eb-6a6351750fa9
 # ╠═743cf6ad-ddaa-403f-8ab8-83513c804134
 # ╠═7c7b0c5a-ca81-4906-b0a2-ab0c2f1b7782
 # ╠═351d5b4f-4347-441a-88ef-06d54eaf0c16
 # ╠═058622d9-db81-4a0b-a7a7-dcc5fb765090
+# ╠═e52988c7-a2d1-411c-a0cf-119180b2d0e0
+# ╠═fd9ece7a-2466-47b8-94b5-02dd5f3181ca
+# ╠═d1977228-b7a2-4a87-b556-c111039509ce
+# ╠═ad0b9cfa-a1e6-479c-99ae-179b778c716b
+# ╠═daafbdec-0311-4981-a8e2-201edeca5b1e
+# ╠═a68e35de-883c-46ec-ab66-6a77b43a04c7
+# ╠═99608de8-ef1c-473c-a8d4-f21d9800e389
+# ╠═b4689f1e-e0fd-4bdf-b257-025357fbdcfe
+# ╠═c0da29e4-fcef-4d3a-8552-e0ebe1664947
+# ╠═61374576-9bda-457b-9cad-bad116444c93
 # ╠═abb43a1b-2099-4685-81b8-ccb660c3b91e
+# ╠═1f0c9888-b894-4ef1-9bff-f594f97858dd
+# ╠═cfc6721e-b68f-4c2f-8d5a-0e5553f7e049
+# ╠═f1a83226-62cf-4942-8d9c-7eb957021f8f
+# ╠═cbaae95d-583a-4acc-bbb5-0f9c527ad9f8
+# ╠═520d50a4-8d67-448c-b8b1-4abdec40b369
+# ╠═e60856cf-9e2e-4759-806e-409746af824b
+# ╟─a88be53e-b4df-4146-a73e-81259c6214d5
+# ╠═1c70d431-0549-4736-8131-287ad37f3c1e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

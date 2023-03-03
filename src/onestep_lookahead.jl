@@ -9,7 +9,7 @@ using StatsBase
     n_actions::Int = 20 # Number of actions to branch.
     n_obs::Int = 5 # Number of observations per action to branch (equal to number of belief updates)
     estimate_value::Function = b->0.0 # Leaf node value estimator
-    next_action::Union{Function,Nothing} = nothing # Next action sampler (TODO: Replace with policy head of network)
+    next_action::Union{Function,Nothing} = nothing # Next action sampler
 end
 
 
@@ -24,7 +24,7 @@ end
 Greedy one-step lookahead solver. Used as baseline/verifier.
 """
 POMDPs.solve(solver::OneStepLookaheadSolver, mdp::MDP) = OneStepLookaheadPlanner(solver, mdp, Random.GLOBAL_RNG)
-# POMDPs.solve(solver::OneStepLookaheadSolver, pomdp::POMDP) = OneStepLookaheadPlanner(solver, mdp, Random.GLOBAL_RNG)
+# POMDPs.solve(solver::OneStepLookaheadSolver, pomdp::POMDP) = OneStepLookaheadPlanner(solver, pomdp, Random.GLOBAL_RNG)
 
 
 """

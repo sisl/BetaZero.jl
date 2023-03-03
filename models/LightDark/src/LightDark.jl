@@ -53,13 +53,19 @@ struct LDNormalStateDist
     mean::Float64
     std::Float64
 end
+struct LDUniformStateDist
+    a::Float64
+    b::Float64
+end
 
-POMDPModels.sampletype(::Type{LDNormalStateDist}) = LightDarkState
-Base.rand(rng::AbstractRNG, d::LDNormalStateDist) = LightDarkState(0, d.mean + randn(rng)*d.std)
-Base.rand(rng::AbstractRNG, d::LDNormalStateDist, n::Int) = LightDarkState[rand(rng, d) for _ in 1:n]
-Base.rand(d::LDNormalStateDist) = rand(Random.GLOBAL_RNG, d)
-Base.rand(d::LDNormalStateDist, n::Int) = rand(Random.GLOBAL_RNG, d, n)
-POMDPs.initialstate(pomdp::LightDarkPOMDP) = LDNormalStateDist(2, 3)
+POMDPModels.sampletype(::Type{Union{LDNormalStateDist,LDUniformStateDist}}) = LightDarkState
+Base.rand(rng::AbstractRNG, d::LDNormalStateDist) = LightDarkState(0, d.mean + randn(rng)*d.std) # Normally distributed initial state
+Base.rand(rng::AbstractRNG, d::LDUniformStateDist) = LightDarkState(0, rand(rng, Distributions.Uniform(d.a, d.b))) # Uniformly distributed initial state
+Base.rand(rng::AbstractRNG, d::Union{LDNormalStateDist,LDUniformStateDist}, n::Int) = LightDarkState[rand(rng, d) for _ in 1:n]
+Base.rand(d::Union{LDNormalStateDist,LDUniformStateDist}) = rand(Random.GLOBAL_RNG, d)
+Base.rand(d::Union{LDNormalStateDist,LDUniformStateDist}, n::Int) = rand(Random.GLOBAL_RNG, d, n)
+
+POMDPs.initialstate(pomdp::LightDarkPOMDP; isuniform::Bool=false) = isuniform ? LDUniformStateDist(-30, 30) : LDNormalStateDist(2, 3)
 POMDPs.initialobs(m::LightDarkPOMDP, s) = observation(m, s)
 
 POMDPs.observation(p::LightDarkPOMDP, sp::LightDarkState) = Normal(sp.y, p.sigma(sp.y))
@@ -120,6 +126,6 @@ end
 ParticleFilters.particles(b::ParticleHistoryBelief) = particles(b.particles)
 ParticleFilters.support(b::ParticleHistoryBelief) = particles(b)
 
-POMDPs.initialstate_distribution(pomdp::LightDarkPOMDP) = initialstate(pomdp) # deprecated in POMDPs v0.9
+POMDPs.initialstate_distribution(pomdp::LightDarkPOMDP; kwargs...) = initialstate(pomdp; kwargs...) # deprecated in POMDPs v0.9
 
 end # module LightDark

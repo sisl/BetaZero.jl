@@ -39,3 +39,5 @@ function minex_accuracy_func(pomdp::POMDP, belief, state, action, returns)
     is_correct = action.type == truth
     return is_correct
 end
+
+minex_belief_reward = (pomdp::POMDP, b, a, bp)->mean(reward(pomdp, s, a) for s in MineralExploration.particles(b))

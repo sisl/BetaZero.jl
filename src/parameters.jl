@@ -16,18 +16,32 @@ end
 Parameters for neural network surrogate model.
 """
 @with_kw mutable struct BetaZeroNetworkParameters
-    input_size = (30,30,5)
+    action_size::Int # [REQUIRED] Number of actions in the action space
+    input_size = (30,30,5) # Input belief size
     training_epochs::Int = 1000 # Number of network training updates
     n_samples::Int = 10_000 # Number of samples (i.e., simulated POMDP time steps from data collection) to use during training + validation
-    normalize_target::Bool = true # Normalize target data to standard normal (0 mean)
+    normalize_input::Bool = true # Normalize input data to standard normal (0 mean)
+    normalize_output::Bool = true # Normalize output (target) data to standard normal (0 mean)
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
-    batchsize::Int = 512
-    learning_rate::Float64 = 0.01 # Learning rate for ADAM optimizer during training
-    λ_regularization::Float64 = 0.0001 # Parameter for L2-norm regularization
+    batchsize::Int = 512 # Batch size
+    learning_rate::Float64 = 0.001 # Learning rate for ADAM optimizer during training
+    λ_regularization::Float64 = 1e-5 # Parameter for L2-norm regularization
+    optimizer = Adam # Training optimizer (e.g., Adam, Descent, Nesterov)
     loss_func::Function = Flux.Losses.mae # MAE works well for problems with large returns around zero, and spread out otherwise.
-    device = gpu
+    activation::Function = relu # Activation function
+    layer_size::Int = 64 # Number of connections in fully connected layers (for CNN, refers to fully connected "head" layers)
+    use_cnn::Bool = false # Use convolutional neural network
+    cnn_params::NamedTuple = (filter=(5,5), num_filters=[6, 16], num_dense=[120, 84])
+    use_dropout::Bool = false # Indicate the use of dropout layers
+    p_dropout::Float64 = 0.2 # Probability of dropout
+    use_batchnorm::Bool = false # Indicate the use of batch normalization layers
+    batchnorm_momentum = 0.1f0 # Momentum parameter for batch normalization
+    device = gpu # Indicate what device to train on (`gpu` or `cpu`)
+    use_checkpoint::Bool = true # Save networks along the way to use based on minimum validation loss
+    checkpoint_frequency::Int = 1 # How often do we evaluate and save a checkpoint?
+    checkpoint_validation_loss::Bool = true # Checkpoint based on minimum validation loss (`false` = checkpointing on training loss)
     verbose_update_frequency::Int = training_epochs # Frequency of printed training output
-    verbose_plot_frequency::Number = 10 # Frequency of plotted training/validation output
+    verbose_plot_frequency::Number = Inf # Frequency of plotted training/validation output
 end
 
 
@@ -35,15 +49,21 @@ end
 Parameters for Gaussian procces surrogate model.
 """
 @with_kw mutable struct BetaZeroGPParameters
-    kernel = Matern(1/2, 1.0, 10.0)
-    input_size = (6,)
-    n_samples::Int = 500 # Number of samples (i.e., simulated POMDP time steps from data collection) to use during training + validation
+    kernel_v = Matern(1/2, 2.5, 2.5) # Kernel for value surrogate
+    kernel_p = SE(1.0, 1.0) # Kernel for policy surrogate (deepcopied to have one GP for each action)
+    input_size = (2,) # Input belief size (e.g., [μ, σ])
+    n_samples::Int = 100 # Number of samples (i.e., simulated POMDP time steps from data collection) to use during training + validation
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
     λ_lcb::Float64 = 0.1 # Parameter for lower confidence bound (LCB)
+    opt_iterations::Int = 10_000 # Number of iterations for GP optimization (different from `optimze`)
+    tune_individual_action_gps::Bool = false # Indicate if policy GP should tune hyperparameters on each individual action GP (or share parameters across all actions)
     verbose_plot::Bool = false # Indicator of plotted training/validation output
-    use_lcb::Bool = true # Use LCB when predicting
+    verbose_show_value_plot::Bool = false # Show value heatmap
+    verbose_show_policy_plot::Bool = false # Show policy heatmap
+    verbose_show_individual_action_plots::Bool = false # Show heatmap for individual action GPs
+    use_lcb::Bool = false # Use LCB when predicting
     use_lcb_initial::Bool = false # Use LCB when predicting initial GP (generally keep at `false` as the uncertainty is high with mean zero, leading to large negative initial value estimates)
-    optimize::Bool = false # Indicate if GP params should be optimized to the training data (generally keep at `false`)
+    optimize::Bool = true # Indicate if GP params should be optimized to the validation data
 end
 
 
