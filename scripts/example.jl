@@ -4,19 +4,17 @@ using Distributed
 
 @everywhere begin
     using BetaZero
-    include("minex_pomdp.jl")
-    include("minex_representation.jl")
+    # include("minex_pomdp.jl")
+    # include("minex_representation.jl")
+    include("simple_minex_pomdp.jl")
 end
 
 solver = BetaZeroSolver(pomdp=pomdp,
                         updater=up,
-                        belief_reward=minex_belief_reward,
+                        belief_reward=simple_minex_belief_reward,
                         collect_metrics=true,
                         verbose=true,
-                        accuracy_func=minex_accuracy_func)
-
-# solver.mcts_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
-# solver.onestep_solver.next_action = minexp_next_action # TODO: To be replace with policy head of the network.
+                        accuracy_func=simple_minex_accuracy_func)
 
 # BetaZero parameters
 solver.params.n_iterations = 10
@@ -37,16 +35,9 @@ solver.nn_params.batchsize = 512
 
 # Plotting parameters
 solver.plot_incremental_data_gen = true
-solver.plot_incremental_holdout = true
-# solver.expert_results = (expert_accuracy=[0.84, 0.037], expert_returns=[11.963, 1.617], expert_label="LAVI") # POMCPOW baseline?
 
 policy = solve(solver, pomdp)
 
 filename_suffix = "minex.bson"
 BetaZero.save_policy(policy, "BetaZero/notebooks/policy_$filename_suffix")
 BetaZero.save_solver(solver, "BetaZero/notebooks/solver_$filename_suffix")
-
-
-
-policy = solve(solver, pomdp)
-# TODO: save network

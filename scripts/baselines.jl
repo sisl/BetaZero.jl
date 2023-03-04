@@ -1,7 +1,7 @@
+using Distributed
 @everywhere FROM_PARALLEL_RUN = true
 
 if !FROM_PARALLEL_RUN
-    using Distributed
     desired_procs = 10
     nprocs() < desired_procs && addprocs(desired_procs)
 end
@@ -17,9 +17,9 @@ end
         using BetaZero.MCTS
         using BetaZero.GaussianProcesses
         using BetaZero.DataStructures
-        policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "notebooks", "policy_lightdark_64relu.bson"))
-        solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "notebooks", "solver_lightdark_64relu.bson"))
-        en = BetaZero.BSON.load(joinpath(@__DIR__, "..", "notebooks", "ensemble_m5_weekend_50iters_include_missing.bson"))[:en]
+        policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "..", "data", "policy_lightdark_64relu.bson"))
+        solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "data", "solver_lightdark_64relu.bson"))
+        # en = BetaZero.BSON.load(joinpath(@__DIR__, "..", "..", "data", "ensemble_m5_weekend_50iters_include_missing.bson"))[:en]
     end
 
     function solve_osla(f, pomdp, up, belief_reward, next_action=nothing; n_actions=10, n_obs=10)
