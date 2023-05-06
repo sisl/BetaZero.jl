@@ -8,24 +8,28 @@ end
 
 
 @everywhere begin
+    # TODO: Baselines module or cleaned-up file.
+
     using POMCPOW
     using ProgressMeter
     using BetaZero
+    using ParticleBeliefs
+    using Random
 
-    if !FROM_PARALLEL_RUN && !@isdefined(en)
-        include("lightdark.jl")
-        using BetaZero.MCTS
-        using BetaZero.GaussianProcesses
-        using BetaZero.DataStructures
-        policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "..", "data", "policy_lightdark_64relu.bson"))
-        solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "data", "solver_lightdark_64relu.bson"))
-        # en = BetaZero.BSON.load(joinpath(@__DIR__, "..", "..", "data", "ensemble_m5_weekend_50iters_include_missing.bson"))[:en]
-    end
+    # if !FROM_PARALLEL_RUN && !@isdefined(en)
+    #     include("lightdark.jl")
+    #     using BetaZero.MCTS
+    #     using BetaZero.GaussianProcesses
+    #     using BetaZero.DataStructures
+    #     policy = BetaZero.load_policy(joinpath(@__DIR__, "..", "..", "data", "policy_lightdark_64relu.jld2"))
+    #     solver = BetaZero.load_solver(joinpath(@__DIR__, "..", "data", "solver_lightdark_64relu.jld2"))
+    #     # en = BetaZero.BSON.load(joinpath(@__DIR__, "..", "..", "data", "ensemble_m5_weekend_50iters_include_missing.jld2"))[:en]
+    # end
 
     function solve_osla(f, pomdp, up, belief_reward, next_action=nothing; n_actions=10, n_obs=10)
         @show n_actions, n_obs
         solver = OneStepLookaheadSolver(n_actions=n_actions, n_obs=n_obs)
-        solver.estimate_value = b->BetaZero.value_lookup(b, f)
+        solver.estimate_value = b->BetaZero.value_lookup(f, b)
         solver.next_action = next_action
         bmdp = BeliefMDP(pomdp, up, belief_reward)
         planner = solve(solver, bmdp)
@@ -50,27 +54,48 @@ end
 
     function convert_to_pomcow(solver::BetaZeroSolver, n_iterations=solver.mcts_solver.n_iterations)
         return POMCPOWSolver(tree_queries=n_iterations,
-                            check_repeat_obs=true,
-                            check_repeat_act=true,
-                            k_action=solver.mcts_solver.k_action,
-                            alpha_action=solver.mcts_solver.alpha_action,
-                            k_observation=2.0,
-                            alpha_observation=0.1,
-                            criterion=POMCPOW.MaxUCB(solver.mcts_solver.exploration_constant), # 90 in paper (using discrete states)
-                            final_criterion=POMCPOW.MaxQ(),
-                            estimate_value=0.0,
-                            max_depth=solver.mcts_solver.depth)
+                             estimate_value=(pomdp, s, h, steps) -> isterminal(pomdp, s) ? 0 : max(0, MinEx.extraction_reward(pomdp, s)),
+                             criterion=POMCPOW.MaxUCB(100.0),
+                             k_action=4.0,
+                             alpha_action=0.5,
+                             k_observation=2.0,
+                             alpha_observation=0.25,
+                            # estimate_value=0.0,
+                            # check_repeat_obs=false,
+                            # check_repeat_act=true,
+                            # k_action=solver.mcts_solver.k_action,
+                            # alpha_action=solver.mcts_solver.alpha_action,
+                            # k_observation=2.0,
+                            # alpha_observation=0.1,
+                            # criterion=POMCPOW.MaxUCB(solver.mcts_solver.exploration_constant), # 90 in paper (using discrete states)
+                            # final_criterion=POMCPOW.MaxQ(),
+                            # max_depth=solver.mcts_solver.depth
+        )
     end
 
     function adjust_policy(policy, n_iterations)
         policy = deepcopy(policy)
         policy.planner.solver.n_iterations = n_iterations
+
+        ## NOTE!
+        # @warn "Adjusting DWP parameters"
+        # policy.planner.solver.k_action = 4.0
+        # policy.planner.solver.alpha_action = 0.5
+        # policy.planner.solver.exploration_constant = 100.0
+
         return policy
     end
 
     function adjust_solver(solver, n_iterations)
         solver = deepcopy(solver)
         solver.mcts_solver.n_iterations = n_iterations
+
+        ## NOTE!
+        # @warn "Adjusting DWP parameters"
+        # solver.mcts_solver.k_action = 4.0
+        # solver.mcts_solver.alpha_action = 0.5
+        # solver.mcts_solver.exploration_constant = 100.0
+
         return solver
     end
 
@@ -93,11 +118,15 @@ end
 
 # iteration_sweep = [10, 100, 1000, 10_000]
 iteration_sweep = [100]
+pomcpow_iteration_factor = 10
+max_steps = solver.params.max_steps
+n_runs = 50
 
 for n_iterations in iteration_sweep
     @info "Baselining $n_iterations online iterations"
     bz_policy = adjust_policy(policy, n_iterations)
     bz_solver = adjust_solver(solver, n_iterations)
+    accuracy_func = solver.accuracy_func
 
     osla_n_actions = n_iterations
     osla_n_obs = 1
@@ -115,18 +144,18 @@ for n_iterations in iteration_sweep
     policies = Dict(
         "BetaZero"=>bz_policy,
         # "BetaZero (ensemble)"=>en_policy,
-        "Random"=>RandomPolicy(pomdp),
+        # "Random"=>RandomPolicy(pomdp),
         # "One-Step Lookahead"=>solve_osla(bz_policy.surrogate, pomdp, up, lightdark_belief_reward, bz_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
         # "One-Step Lookahead (ensemble)"=>solve_osla(en_policy.surrogate, pomdp, up, lightdark_belief_reward, en_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
         # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
         # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
-        "POMCPOW"=>solve(convert_to_pomcow(bz_solver, 100*bz_solver.mcts_solver.n_iterations), pomdp),
-        "LAVI"=>lavi_policy,
-        "MCTS + LAVI"=>mcts_lavi(bz_policy.planner, lavi_policy),
-        "Raw Network"=>RawNetworkPolicy(pomdp, bz_policy.surrogate),
+        "POMCPOW"=>solve(convert_to_pomcow(bz_solver, pomcpow_iteration_factor*bz_solver.mcts_solver.n_iterations), pomdp),
+        # "LAVI"=>lavi_policy,
+        # "MCTS + LAVI"=>mcts_lavi(bz_policy.planner, lavi_policy),
+        # "Raw Network [policy]"=>RawNetworkPolicy(pomdp, bz_policy.surrogate),
+        # "Raw Network [value]"=>RawValueNetworkPolicy(bz_solver.bmdp, bz_policy.surrogate),
     )
 
-    n_runs = 100
     latex_table = Dict()
     for (k,π) in policies
         @info "Running $k baseline..."
@@ -143,8 +172,14 @@ for n_iterations in iteration_sweep
             local results = pmap(i->begin
                 Random.seed!(i) # Make sure each policy has an apples-to-apples comparison (e.g., same starting episode states, etc.)
                 Random.seed!(rand(1:typemax(UInt64))) # To ensure that we don't use initial states or beliefs that were seen during BetaZero training (still deterministic based on previous `seed!` call)
-                G = simulate(RolloutSimulator(max_steps=100), pomdp, π, up)
-                accuracy = G > 0.0
+                # ds0 = initialstate_distribution(pomdp)
+                # s0 = rand(ds0)
+                # b0 = initialize_belief(up, ds0)
+                # history = simulate(HistoryRecorder(max_steps=max_steps), pomdp, π, up, b0, s0)
+                history = simulate(HistoryRecorder(max_steps=max_steps), pomdp, π, up)
+                G = discounted_reward(history)
+                accuracy = accuracy_func(pomdp, history[end].b, history[end].s, history[end].a, G)
+                # @info "Immediate extraction reward: $(MinEx.extraction_reward(pomdp, s0)) | Accuracy: $(accuracy)"
                 put!(channel, true) # trigger progress bar update
                 G, accuracy
             end, 1:n_runs)
@@ -163,10 +198,11 @@ for n_iterations in iteration_sweep
         latex_table[μ_rd] = "$k & \$$μ_rd \\pm $stderr_rd\$ & \$$μ_acc_rd \\pm $stderr_acc_rd\$ & $time_rd s \\\\"
     end
 
+    println("|", "—"^50, "|")
     for (k,v) in sort(latex_table, rev=true)
         println(v)
     end
     println("—"^50)
     println("    \\item[*] {$n_iterations iterations ($n_runs runs each).}")
-    println("—"^50)
+    println("|", "—"^50, "|")
 end

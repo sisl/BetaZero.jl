@@ -1,0 +1,12 @@
+name = "RobotLocalization"
+uuid = "f2566530-00e9-4976-b5ca-096c4b3606d1"
+authors = ["Robert Moss <rmoss92@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+POMDPTools = "7588e00f-9cae-40de-98dc-e0c70c48cdd7"
+POMDPs = "a93abf59-7444-517b-a68a-c42f96afdd7d"
+ParticleFilters = "c8b314e2-9260-5cf8-ae76-3be7461ca6d0"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+RoombaPOMDPs = "fe2df5ea-4d44-4e5a-a895-9dbc87b19b37"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"

@@ -1,0 +1,306 @@
+"""
+MCTS solver with state and action refinement.
+
+Fields:
+
+    depth::Int64
+        Maximum rollout horizon and tree depth.
+        default: 10
+
+    exploration_constant::Float64
+        Specified how much the solver should explore.
+        In the UCB equation, Q + c*sqrt(log(t/N)), c is the exploration constant.
+        default: 1.0
+
+    n_iterations::Int64
+        Number of iterations during each action() call.
+        default: 100
+
+    max_time::Float64
+        Maximum amount of CPU time spent iterating through simulations.
+        default: Inf
+
+    k_action::Float64
+    alpha_action::Float64
+    k_state::Float64
+    alpha_state::Float64
+        These constants control the double progressive widening. A new state
+        or action will be added if the number of children is less than or equal to kN^alpha.
+        defaults: k:10, alpha:0.5
+
+    keep_tree::Bool
+        If true, store the tree in the planner for reuse at the next timestep (and every time it is used in the future). There is a computational cost for maintaining the state dictionary necessary for this.
+        default: false
+
+    enable_action_pw::Bool
+        If true, enable progressive widening on the action space; if false just use the whole action space.
+        default: true
+
+    enable_state_pw::Bool
+        If true, enable progressive widening on the state space; if false just use the single next state (for deterministic problems).
+        default: true
+
+    check_repeat_state::Bool
+    check_repeat_action::Bool
+        When constructing the tree, check whether a state or action has been seen before (there is a computational cost to maintaining the dictionaries necessary for this)
+        default: true
+
+    tree_in_info::Bool
+        If true, return the tree in the info dict when action_info is called. False by default because it can use a lot of memory if histories are being saved.
+        default: false
+
+    counts_in_info::Bool
+        If true, return the root node counts and their associated actions in the info dict when action_info is called.
+        default: false
+
+    rng::AbstractRNG
+        Random number generator
+
+    estimate_value::Any (rollout policy)
+        Function, object, or number used to estimate the value at the leaf nodes.
+        If this is a function `f`, `f(mdp, s, depth)` will be called to estimate the value (depth can be ignored).
+        If this is an object `o`, `estimate_value(o, mdp, s, depth)` will be called.
+        If this is a number, the value will be set to that number.
+        default: RolloutEstimator(RandomSolver(rng))
+
+    init_Q::Any
+        Function, object, or number used to set the initial Q(s,a) value at a new node.
+        If this is a function `f`, `f(mdp, s, a)` will be called to set the value.
+        If this is an object `o`, `init_Q(o, mdp, s, a)` will be called.
+        If this is a number, Q will always be set to that number.
+        default: 0.0
+
+    init_N::Any
+        Function, object, or number used to set the initial N(s,a) value at a new node.
+        If this is a function `f`, `f(mdp, s, a)` will be called to set the value.
+        If this is an object `o`, `init_N(o, mdp, s, a)` will be called.
+        If this is a number, N will always be set to that number.
+        default: 0
+
+    next_action::Any
+        Function or object used to choose the next action to be considered for progressive widening.
+        The next action is determined based on the MDP, the state, `s`, and the current `DARStateNode`, `snode`.
+        If this is a function `f`, `f(mdp, s, snode)` will be called to set the value.
+        If this is an object `o`, `next_action(o, mdp, s, snode)` will be called.
+        default: RandomActionGenerator(rng)
+
+    default_action::Any
+        Function, action, or Policy used to determine the action if POMCP fails with exception `ex`.
+        If this is a Function `f`, `f(pomdp, belief, ex)` will be called.
+        If this is a Policy `p`, `action(p, belief)` will be called.
+        If it is an object `a`, `default_action(a, pomdp, belief, ex)` will be called, and if this method is not implemented, `a` will be returned directly.
+        default: `ExceptionRethrow()`
+
+    reset_callback::Function
+        Function used to reset/reinitialize the MDP to a given state `s`.
+        Useful when the simulator state is not truly separate from the MDP state.
+        `f(mdp, s)` will be called.
+        default: `(mdp, s)->false` (optimized out)
+
+    show_progress::Bool
+        Show progress bar during simulation.
+        default: false
+
+    timer::Function:
+        Timekeeping method. Search iterations ended when `timer() - start_time ≥ max_time`.
+"""
+# TODO: @with_kw
+mutable struct DARSolver <: AbstractMCTSSolver
+    depth::Int
+    exploration_constant::Float64
+    n_iterations::Int
+    max_time::Float64
+    k_action::Float64
+    alpha_action::Float64
+    k_state::Float64
+    alpha_state::Float64
+    keep_tree::Bool
+    enable_action_pw::Bool
+    enable_state_pw::Bool
+    check_repeat_state::Bool
+    check_repeat_action::Bool
+    tree_in_info::Bool
+    counts_in_info::Bool
+    rng::AbstractRNG
+    estimate_value::Any
+    estimate_policy::Any
+    init_Q::Any
+    init_N::Any
+    next_action::Any
+    default_action::Any
+    reset_callback::Function
+    show_progress::Bool
+    timer::Function
+end
+
+"""
+    DARSolver()
+
+Use keyword arguments to specify values for the fields
+"""
+function DARSolver(;
+                    depth::Int=10,
+                    exploration_constant::Float64=1.0,
+                    n_iterations::Int=100,
+                    max_time::Float64=Inf,
+                    k_action::Float64=10.0,
+                    alpha_action::Float64=0.5,
+                    k_state::Float64=10.0,
+                    alpha_state::Float64=0.5,
+                    keep_tree::Bool=false,
+                    enable_action_pw::Bool=true,
+                    enable_state_pw::Bool=true,
+                    check_repeat_state::Bool=true,
+                    check_repeat_action::Bool=true,
+                    tree_in_info::Bool=false,
+                    counts_in_info::Bool=false,
+                    rng::AbstractRNG=Random.GLOBAL_RNG,
+                    estimate_value::Any=RolloutEstimator(RandomSolver(rng)),
+                    estimate_policy::Any=0,
+                    init_Q::Any=0.0,
+                    init_N::Any=0,
+                    next_action::Any=RandomActionGenerator(rng),
+                    default_action::Any=ExceptionRethrow(),
+                    reset_callback::Function=(mdp, s) -> false,
+                    show_progress::Bool=false,
+                    timer=() -> 1e-9 * time_ns())
+    DARSolver(
+            depth,
+            exploration_constant,
+            n_iterations,
+            max_time,
+            k_action,
+            alpha_action,
+            k_state,
+            alpha_state,
+            keep_tree,
+            enable_action_pw,
+            enable_state_pw,
+            check_repeat_state,
+            check_repeat_action,
+            tree_in_info,
+            counts_in_info,
+            rng,
+            estimate_value,
+            estimate_policy,
+            init_Q,
+            init_N,
+            next_action,
+            default_action,
+            reset_callback,
+            show_progress,
+            timer,
+    )
+end
+
+mutable struct DARTree{S,A}
+    # for each state node
+    total_n::Vector{Int}
+    children::Vector{Vector{Int}}
+    s_labels::Vector{S}
+    s_lookup::Dict{S, Int}
+
+    # for each state-action node
+    n::Vector{Int}
+    q::Vector{Float64}
+    transitions::Vector{Vector{Tuple{Int,Float64}}}
+    a_labels::Vector{A}
+    a_lookup::Dict{Tuple{Int,A}, Int}
+
+    # for tracking transitions
+    n_a_children::Vector{Int}
+    unique_transitions::Set{Tuple{Int,Int}}
+
+
+    function DARTree{S,A}(sz::Int=1000) where {S,A} 
+        sz = min(sz, 100_000)
+        return new(sizehint!(Int[], sz),
+                   sizehint!(Vector{Int}[], sz),
+                   sizehint!(S[], sz),
+                   Dict{S, Int}(),
+                   
+                   sizehint!(Int[], sz),
+                   sizehint!(Float64[], sz),
+                   sizehint!(Vector{Tuple{Int,Float64}}[], sz),
+                   sizehint!(A[], sz),
+                   Dict{Tuple{Int,A}, Int}(),
+
+                   sizehint!(Int[], sz),
+                   Set{Tuple{Int,Int}}()
+                  )
+    end
+end
+
+
+function insert_state_node!(tree::DARTree{S,A}, s::S, maintain_s_lookup=true) where {S,A}
+    push!(tree.total_n, 0)
+    push!(tree.children, Int[])
+    push!(tree.s_labels, s)
+    snode = length(tree.total_n)
+    if maintain_s_lookup
+        tree.s_lookup[s] = snode
+    end
+    return snode
+end
+
+
+function insert_action_node!(tree::DARTree{S,A}, snode::Int, a::A, n0::Int, q0::Float64, maintain_a_lookup=true) where {S,A}
+    push!(tree.n, n0)
+    push!(tree.q, q0)
+    push!(tree.a_labels, a)
+    push!(tree.transitions, Vector{Tuple{Int,Float64}}[])
+    sanode = length(tree.n)
+    push!(tree.children[snode], sanode)
+    push!(tree.n_a_children, 0)
+    if maintain_a_lookup
+        tree.a_lookup[(snode, a)] = sanode
+    end
+    return sanode
+end
+
+Base.isempty(tree::DARTree) = isempty(tree.n) && isempty(tree.q)
+
+struct DARStateNode{S,A} <: AbstractStateNode
+    tree::DARTree{S,A}
+    index::Int
+end
+
+children(n::DARStateNode) = n.tree.children[n.index]
+n_children(n::DARStateNode) = length(children(n))
+isroot(n::DARStateNode) = n.index == 1
+
+
+mutable struct DARPlanner{P<:Union{MDP,POMDP}, S, A, VE, PE, NA, RCB, RNG} <: AbstractMCTSPlanner{P}
+    solver::DARSolver
+    mdp::P
+    tree::Union{Nothing, DARTree{S,A}}
+    value_estimate::VE # TODO: rename solved_value_estimate
+    policy_estimate::PE # TODO: rename solved_policy_estimate
+    next_action::NA
+    reset_callback::RCB
+    rng::RNG
+end
+
+
+function DARPlanner(solver::DARSolver, mdp::P) where P<:Union{POMDP,MDP}
+    ve = convert_estimator(solver.estimate_value, solver, mdp)
+    pe = convert_estimator(solver.estimate_policy, solver, mdp)
+    return DARPlanner{P,
+                      statetype(P),
+                      actiontype(P),
+                      typeof(ve),
+                      typeof(pe),
+                      typeof(solver.next_action),
+                      typeof(solver.reset_callback),
+                      typeof(solver.rng)}(solver,
+                                          mdp,
+                                          nothing,
+                                          ve,
+                                          pe,
+                                          solver.next_action,
+                                          solver.reset_callback,
+                                          solver.rng
+                     )
+end
+
+Random.seed!(p::DARPlanner, seed) = Random.seed!(p.rng, seed)

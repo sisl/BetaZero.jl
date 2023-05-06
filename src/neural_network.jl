@@ -2,7 +2,7 @@
 Initialize policy & value network with random weights.
 """
 initialize_network(solver::BetaZeroSolver) = initialize_network(solver.nn_params)
-function initialize_network(nn_params::BetaZeroNetworkParameters) # LeNet5
+function initialize_network(nn_params::BetaZeroNetworkParameters)
     input_size = nn_params.input_size
     action_size = nn_params.action_size
     activation = nn_params.activation
@@ -13,7 +13,7 @@ function initialize_network(nn_params::BetaZeroNetworkParameters) # LeNet5
     use_batchnorm = nn_params.use_batchnorm
     batchnorm_momentum = nn_params.batchnorm_momentum
 
-    function DenseLayer(in_out::Pair)
+    function DenseRegularizedLayer(in_out::Pair)
         input, output = in_out
         if use_batchnorm && !use_dropout
             return [Dense(input => output), BatchNorm(output, activation, momentum=batchnorm_momentum)]
@@ -26,47 +26,87 @@ function initialize_network(nn_params::BetaZeroNetworkParameters) # LeNet5
         end
     end
 
+    function ConvRegularizedLayer(filter, in_out::Pair)
+        input, output = in_out
+        if use_batchnorm
+            return [Conv(filter, input => output), BatchNorm(output, activation, momentum=batchnorm_momentum)]
+        else
+            return [Conv(filter, input => output, activation)]
+        end
+    end
+
     if nn_params.use_cnn
         cnn_params = nn_params.cnn_params
         filter = cnn_params.filter
+        filter_policy = (1,1)
+        filter_value = (1,1)
         num_filters1 = cnn_params.num_filters[1]
         num_filters2 = cnn_params.num_filters[2]
+        num_filters_policy = 2
+        num_filters_value = 1
         out_conv_size = prod([input_size[1] - 2*(filter[1]-1), input_size[2] - 2*(filter[2]-1), num_filters2])
+        out_conv_size_policy = prod([input_size[1] - 2*(filter[1]-1) - (filter_policy[1]-1), input_size[2] - 2*(filter[2]-1), num_filters_policy])
+        out_conv_size_value = prod([input_size[1] - 2*(filter[1]-1) - (filter_value[1]-1), input_size[2] - 2*(filter[2]-1), num_filters_value])
         num_dense1 = cnn_params.num_dense[1]
         num_dense2 = cnn_params.num_dense[2]
 
-        return Chain(
-            Conv(filter, input_size[end]=>num_filters1, activation),
-            Conv(filter, num_filters1=>num_filters2, activation),
-            Flux.flatten,
-            DenseLayer(out_conv_size=>num_dense1)...,
-            DenseLayer(num_dense1=>num_dense2)...,
-            Parallel(vcat,
-                value_head = Chain(
-                    DenseLayer(num_dense2 => ℓs)...,
-                    Dense(ℓs => 1),
-                    # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
-                ),
-                policy_head = Chain(
-                    DenseLayer(num_dense2 => ℓs)...,
-                    Dense(ℓs => action_size),
-                    softmax,
+        if nn_params.use_deepmind_arch
+            # Simplified non-resnet AlphaZero architecture.
+            return Chain(
+                ConvRegularizedLayer(filter, input_size[end]=>num_filters1)...,
+                ConvRegularizedLayer(filter, num_filters1=>num_filters2)...,
+                Parallel(vcat,
+                    value_head = Chain(
+                        ConvRegularizedLayer(filter_value, num_filters2=>num_filters_value)...,
+                        Flux.flatten,
+                        Dense(out_conv_size_value => ℓs, relu),
+                        Dense(ℓs => 1),
+                        # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
+                    ),
+                    policy_head = Chain(
+                        ConvRegularizedLayer(filter_policy, num_filters2=>num_filters_policy)...,
+                        Flux.flatten,
+                        Dense(out_conv_size_policy => action_size),
+                        softmax,
+                    )
                 )
             )
-        )
+        else
+            # LeNet5 inspired architecture (default).
+            return Chain(
+                Conv(filter, input_size[end]=>num_filters1, activation),
+                Conv(filter, num_filters1=>num_filters2, activation),
+                Flux.flatten,
+                DenseRegularizedLayer(out_conv_size=>num_dense1)...,
+                DenseRegularizedLayer(num_dense1=>num_dense2)...,
+                Parallel(vcat,
+                    value_head = Chain(
+                        DenseRegularizedLayer(num_dense2 => ℓs)...,
+                        Dense(ℓs => 1),
+                        # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
+                    ),
+                    policy_head = Chain(
+                        DenseRegularizedLayer(num_dense2 => ℓs)...,
+                        Dense(ℓs => action_size),
+                        softmax,
+                    )
+                )
+            )
+        end
     else
+        # Simple fully-connected MLP (default for non-CNN inputs).
         return Chain(
-            DenseLayer(prod(input_size) => ℓs)...,
-            DenseLayer(ℓs => ℓs)...,
-            DenseLayer(ℓs => ℓs)...,
+            DenseRegularizedLayer(prod(input_size) => ℓs)...,
+            DenseRegularizedLayer(ℓs => ℓs)...,
+            DenseRegularizedLayer(ℓs => ℓs)...,
             Parallel(vcat,
-            value_head = Chain(
-                    DenseLayer(ℓs => ℓs)...,
+                value_head = Chain(
+                    DenseRegularizedLayer(ℓs => ℓs)...,
                     Dense(ℓs => 1),
                     # Note: A normalization layer will be added during training (with the old layer removed before the next training phase).
                 ),
                 policy_head = Chain(
-                    DenseLayer(ℓs => ℓs)...,
+                    DenseRegularizedLayer(ℓs => ℓs)...,
                     Dense(ℓs => action_size),
                     softmax,
                 )
@@ -79,24 +119,31 @@ end
 """
 Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
 """
-function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing)
+function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing, ϵ_std::Float32=1f-10)
     nn_params = solver.nn_params
     lr = nn_params.learning_rate
     λ = nn_params.λ_regularization
     loss_str = string(nn_params.loss_func)
     normalize_input = nn_params.normalize_input
     normalize_output = nn_params.normalize_output
+    sample_more_than_collected = nn_params.sample_more_than_collected
+    classification_loss_weight = nn_params.classification_loss_weight
+    use_kl_loss = nn_params.use_kl_loss
     key = (lr, λ, loss_str, normalize_input, normalize_output)
 
     n_train = Int(nn_params.n_samples ÷ (1/nn_params.training_split))
     n_valid = nn_params.n_samples - n_train
 
-    data_train = sample_data(solver.data_buffer_train, n_train) # sample from last `n_buffer` simulations.
-    data_valid = sample_data(solver.data_buffer_valid, n_valid) # sample from last `n_buffer` simulations.
+    data_train = sample_data(solver.data_buffer_train, n_train; sample_more_than_collected) # sample from last `n_buffer` simulations.
+    data_valid = sample_data(solver.data_buffer_valid, n_valid; sample_more_than_collected) # sample from last `n_buffer` simulations.
     x_train, y_train = data_train.X, data_train.Y
     x_valid, y_valid = data_valid.X, data_valid.Y
 
-    normalize_func(x, μ, σ) = (x .- μ) ./ σ
+    # Update training and validation set size (could be different based on available data to be sampled)
+    n_train = size(y_train)[end]
+    n_valid = size(y_valid)[end]
+
+    normalize_func(x, μ, σ) = (x .- μ) ./ (σ .+ ϵ_std)
 
     # Normalize input values close to the range of [-1, 1]
     if normalize_input
@@ -127,7 +174,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     if n_train < nn_params.batchsize
         batchsize = n_train
-        @warn "Number of observations less than batch-size, decreasing the batch-size to $batchsize"
+        @warn("Number of observations less than batch-size, decreasing the batch-size to $batchsize", maxlog=1)
     else
         batchsize = nn_params.batchsize
     end
@@ -157,16 +204,34 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     sqnorm(x) = sum(abs2, x)
     penalty() = λ*sum(sqnorm, Flux.params(f))
     sign_accuracy(x, y) = mean(sign.(f(x)[1,:]) .== sign.(y[1,:]))
-    loss(x, y) = begin
+
+    verbose && @info "Using classification weight of: $classification_loss_weight"
+
+    loss(x, y; w=classification_loss_weight, info=Dict()) = begin
         local ỹ = f(x)
-        # vmask = Flux.CuArray([1,0,0,0])
-        vmask = Flux.CuArray(vcat(1, zeros(Int,size(ỹ,1)-1)))
+        n = size(ỹ,1)-1
+        vmask = Flux.CuArray(vcat(1, zeros(Int,n)))
         pmask = 1 .- vmask
         v = vmask .* ỹ # value prediction
         𝐩 = pmask .* ỹ # policy prediction
         z = vmask .* y # true value
         π = pmask .* y # true policy vector
-        nn_params.loss_func(v, z) + Flux.Losses.crossentropy(𝐩, π) + penalty()
+
+        value_loss = w*nn_params.loss_func(v, z)
+        if use_kl_loss
+            policy_loss = (1-w)*Flux.Losses.kldivergence(𝐩, π)
+        else
+            policy_loss = (1-w)*Flux.Losses.crossentropy(𝐩, π)
+        end
+        regularization = penalty()
+
+        ignore_derivatives() do
+            info[:value_loss] = value_loss
+            info[:policy_loss] = policy_loss
+            info[:regularization] = regularization
+        end
+
+        value_loss + policy_loss + regularization
     end
 
     opt = nn_params.optimizer(lr)
@@ -174,12 +239,20 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     training_epochs = nn_params.training_epochs
     losses_train = []
+    losses_train_value = []
+    losses_train_policy = []
     losses_valid = []
+    losses_valid_value = []
+    losses_valid_policy = []
     accs_train = []
     accs_valid = []
     learning_curve = nothing
     checkpoint_loss_valid = Inf
+    checkpoint_loss_valid_value = Inf
+    checkpoint_loss_valid_policy = Inf
     checkpoint_loss_train = Inf
+    checkpoint_loss_train_value = Inf
+    checkpoint_loss_train_policy = Inf
     checkpoint_acc_valid = 0
     checkpoint_acc_train = 0
     f_checkpoint = f
@@ -190,45 +263,96 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     local acc_valid = 0
     local checkpoint_epoch = Inf
 
-    logging_fn(epoch, loss_train, loss_valid, acc_train, acc_valid; extra="", digits=5) = string("Epoch: ", epoch, "\t Loss Train: ", round(loss_train; digits), "\t Loss Val: ", round(loss_valid; digits), " \t|\t Sign Acc. Train: ", rpad(round(acc_train; digits), digits+2, '0'), "\t Sign Acc. Val: ", rpad(round(acc_valid; digits), digits+2, '0'), extra)
+    logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid; extra="", digits=5) = string("Epoch: ", epoch, "\t Loss Train: ", round(loss_train; digits), " [", round(loss_train_value; digits), ", ", round(loss_train_policy; digits), "]\t Loss Val: ", round(loss_valid; digits), " [", round(loss_valid_value; digits), ", ", round(loss_valid_policy; digits), "]\t|\t Sign Acc. Train: ", rpad(round(acc_train; digits), digits+2, '0'), "\t Sign Acc. Val: ", rpad(round(acc_valid; digits), digits+2, '0'), extra)
+
+    # TODO: Parameterize
+    SAVE_DONT_DISPLAY = true
+
+    function plot_training(e, training_epochs, losses_train, losses_train_value, losses_train_policy, losses_valid, losses_valid_value, losses_valid_policy, key)
+        learning_curve = plot(xlims=(1, training_epochs), title="learning curve: $key")
+        plot!(1:e, losses_train, label="training", c=1)
+        plot!(1:e, losses_train_value, label="training (value)", c=1, ls=:dash)
+        plot!(1:e, losses_train_policy, label="training (policy)", c=1, ls=:dot)
+        plot!(1:e, losses_valid, label="validation", c=2)
+        plot!(1:e, losses_valid_value, label="validation (value)", c=2, ls=:dash)
+        plot!(1:e, losses_valid_policy, label="validation (policy)", c=2, ls=:dot)
+        ylims!(0, ylims()[2])
+        return learning_curve
+    end
+
+    # TODO: Parameterize
+    stop_short = true
+    stop_short_threshold = 1000 # TODO: Parameterize
+    has_stopped_short = false
+    final_stopped_epoch = -Inf
 
     verbose && @info "Beginning training $(size(x_train))"
     @conditional_time verbose for e in 1:training_epochs
+        # opt.eta = learning_rate_schedule(e, training_epochs)
+        w = classification_loss_weight
         for (x, y) in train_data
-            _, back = Flux.pullback(() -> loss(x, y), θ)
+            # TODO: Only put batches on GPU
+            # x = device(x)
+            # y = device(y)
+            _, back = Flux.pullback(() -> loss(x, y; w), θ)
             Flux.update!(opt, θ, back(1.0f0))
         end
-        loss_train = loss(x_train, y_train)
-        loss_valid = loss(x_valid, y_valid)
+        loss_train_info = Dict()
+        loss_train = loss(x_train, y_train; w, info=loss_train_info)
+        loss_train_value = loss_train_info[:value_loss]
+        loss_train_policy = loss_train_info[:policy_loss]
+        loss_valid_info = Dict()
+        loss_valid = loss(x_valid, y_valid; w, info=loss_valid_info)
+        loss_valid_value = loss_valid_info[:value_loss]
+        loss_valid_policy = loss_valid_info[:policy_loss]
         acc_train = sign_accuracy(x_train, y_train)
         acc_valid = sign_accuracy(x_valid, y_valid)
         push!(losses_train, loss_train)
+        push!(losses_train_value, loss_train_value)
+        push!(losses_train_policy, loss_train_policy)
         push!(losses_valid, loss_valid)
+        push!(losses_valid_value, loss_valid_value)
+        push!(losses_valid_policy, loss_valid_policy)
         push!(accs_train, acc_train)
         push!(accs_valid, acc_valid)
         if verbose && e % nn_params.verbose_update_frequency == 0
-            println(logging_fn(e, loss_train, loss_valid, acc_train, acc_valid))
+            println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid))
         end
         if e % nn_params.checkpoint_frequency == 0
             checkpoint_condition = nn_params.checkpoint_validation_loss ? loss_valid < checkpoint_loss_valid : loss_train < checkpoint_loss_train
             if checkpoint_condition
                 checkpoint_loss_valid = loss_valid
+                checkpoint_loss_valid_value = loss_valid_value
+                checkpoint_loss_valid_policy = loss_valid_policy
                 checkpoint_loss_train = loss_train
+                checkpoint_loss_train_value = loss_train_value
+                checkpoint_loss_train_policy = loss_train_policy
                 checkpoint_acc_valid = acc_valid
                 checkpoint_acc_train = acc_train
                 checkpoint_epoch = e
                 f_checkpoint = deepcopy(f)
-                verbose && println(logging_fn(e, loss_train, loss_valid, acc_train, acc_valid; extra=" [Checkpoint]"))
+                verbose && println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid; extra=" [Checkpoint]"))
             end
         end
 
         if e % nn_params.verbose_plot_frequency == 0
-            # TODO: Generalize y-values
-            learning_curve = plot(xlims=(1, training_epochs), ylims=(0, 1), title="learning curve: $key")
-            plot!(1:e, losses_train, label="training")
-            plot!(1:e, losses_valid, label="validation")
-            display(learning_curve)
+            learning_curve = plot_training(e, training_epochs, losses_train, losses_train_value, losses_train_policy, losses_valid, losses_valid_value, losses_valid_policy, key)
+            nn_params.save_plots && Plots.savefig(nn_params.plot_curve_filename)
+            nn_params.display_plots && display(learning_curve)
         end
+
+        if stop_short && e - checkpoint_epoch > stop_short_threshold
+            @info "Stopping short at epoch $e"
+            has_stopped_short = true
+            final_stopped_epoch = e
+            break
+        end
+    end
+
+    if has_stopped_short && nn_params.verbose_plot_frequency != Inf
+        learning_curve = plot_training(final_stopped_epoch, training_epochs, losses_train, losses_train_value, losses_train_policy, losses_valid, losses_valid_value, losses_valid_policy, key)
+        nn_params.save_plots && Plots.savefig(nn_params.plot_curve_filename)
+        nn_params.display_plots && display(learning_curve)
     end
 
     if nn_params.use_checkpoint
@@ -236,13 +360,17 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         checkpoint_condition = nn_params.checkpoint_validation_loss ? loss_valid < checkpoint_loss_valid : loss_train < checkpoint_loss_train
         if checkpoint_condition
             checkpoint_loss_valid = loss_valid
+            checkpoint_loss_valid_value = loss_valid_value
+            checkpoint_loss_valid_policy = loss_valid_policy
             checkpoint_loss_train = loss_train
+            checkpoint_loss_train_value = loss_train_value
+            checkpoint_loss_train_policy = loss_train_policy
             checkpoint_acc_valid = acc_valid
             checkpoint_acc_train = acc_train
             checkpoint_epoch = training_epochs
             f_checkpoint = deepcopy(f)
         end
-        verbose && println(logging_fn(checkpoint_epoch, checkpoint_loss_train, checkpoint_loss_valid, checkpoint_acc_train, checkpoint_acc_valid; extra=" [Final network checkpoint]"))
+        verbose && println(logging_fn(checkpoint_epoch, checkpoint_loss_train, checkpoint_loss_train_value, checkpoint_loss_train_policy, checkpoint_loss_valid, checkpoint_loss_valid_value, checkpoint_loss_valid_policy, checkpoint_acc_train, checkpoint_acc_valid; extra=" [Final network checkpoint]"))
         f = f_checkpoint
     end
 
@@ -252,7 +380,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     if normalize_input
         # Add normalization input layer
         unnormalize_x = x -> (x .* std_x) .+ mean_x
-        normalize_x = x -> (x .- mean_x) ./ std_x
+        normalize_x = x -> (x .- mean_x) ./ (std_x .+ ϵ_std)
         f = Chain(normalize_x, f.layers...)
     end
 
@@ -275,14 +403,18 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         try
             value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=:gray, title="values: $key")
             Plots.histogram!(value_data, alpha=0.5, label="data", c=:navy)
-            display(value_distribution)
+            nn_params.save_plots && Plots.savefig(nn_params.plot_value_distribution_filename)
+            nn_params.display_plots && display(value_distribution)
+
             plot_bias(value_model, value_data)
-            display(Plots.title!("validation data"))
+            nn_params.save_plots && Plots.savefig(nn_params.plot_validation_bias_filename)
+            nn_params.display_plots && display(Plots.title!("validation data"))
 
             value_model_training = normalize_input ? f(unnormalize_x(cpu(x_train)))[1,:] : f(cpu(x_train))[1,:]
             value_data_training = normalize_output ? unnormalize_y(cpu(y_train))[1,:] : cpu(y_train)[1,:]
             plot_bias(value_model_training, value_data_training)
-            display(Plots.title!("training data"))
+            nn_params.save_plots && Plots.savefig(nn_params.plot_training_bias_filename)
+            nn_params.display_plots && display(Plots.title!("training data"))
         catch err
             @warn "Error in plotting learning curve and value distribution: $err"
         end
@@ -292,7 +424,11 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     if !isnothing(results) && isa(results, Dict)
         results[key] = Dict(
             "losses_train" => losses_train,
+            "losses_train_value" => losses_train_value,
+            "losses_train_policy" => losses_train_policy,
             "losses_valid" => losses_valid,
+            "losses_valid_value" => losses_valid_value,
+            "losses_valid_policy" => losses_valid_policy,
             "accs_train" => accs_train,
             "accs_valid" => accs_valid,
             "value_model" => value_model,
@@ -324,21 +460,24 @@ end
 Evaluate the neural network `f` using the `belief` as input, return the predicted value.
 Note, inference is done on the CPU given a single input.
 """
-function value_lookup(belief, f::Union{Chain,EnsembleNetwork})
+value_lookup(policy::BetaZeroPolicy, belief) = value_lookup(policy.surrogate, belief)
+function value_lookup(f::Union{Chain,EnsembleNetwork}, belief)
     b = Float32.(input_representation(belief))
     x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
     y = f(x) # evaluate network `f`
     value = cpu(y)
     return value[1]
-    # return length(value) == 1 ? value[1] : value
 end
+POMDPs.value(policy::BetaZeroPolicy, belief) = value_lookup(policy, belief)
+POMDPs.value(f::Union{Chain,EnsembleNetwork}, belief) = value_lookup(f, belief)
 
 
 """
 Evaluate the neural network `f` using the `belief` as input, return the predicted policy vector.
 Note, inference is done on the CPU given a single input.
 """
-function policy_lookup(belief, f::Union{Chain,EnsembleNetwork})
+policy_lookup(policy::BetaZeroPolicy, belief) = policy_lookup(policy.surrogate, belief)
+function policy_lookup(f::Union{Chain,EnsembleNetwork}, belief)
     b = Float32.(input_representation(belief))
     x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
     y = f(x) # evaluate network `f`
@@ -350,10 +489,60 @@ end
 """
 Use predicted policy vector to sample next action.
 """
-function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,EnsembleNetwork})
-    p = policy_lookup(belief, f)
-    as = POMDPs.actions(problem) # TODO: actions(problem, belief) ??
-    return rand(SparseCat(as, p))
+function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,EnsembleNetwork}, nn_params::BetaZeroNetworkParameters, bnode)
+    p = policy_lookup(f, belief)
+    A = POMDPs.actions(problem)
+    Ab = POMDPs.actions(problem, belief)
+
+    # Match indices of (potentially) reduced belief-dependent action space to get correctly associated probabilities from the network
+    if length(A) != length(Ab)
+        idx = Vector{Int}(undef, length(Ab))
+        for (i,a) in enumerate(A)
+            for (j,ab) in enumerate(Ab)
+                if a == ab
+                    idx[j] = i
+                    break
+                end
+            end
+        end
+        p = p[idx]
+    end
+
+    if nn_params.use_dirichlet_exploration
+        α = nn_params.α_dirichlet
+        ϵ = nn_params.ϵ_dirichlet
+        k = length(p)
+        η = rand(Dirichlet(k, α))
+        p = (1 - ϵ)*p + ϵ*η
+    end
+
+    # Zero-out already tried actions
+    if nn_params.zero_out_tried_actions
+        action_indices = bnode.tree.children[bnode.index]
+        tried_actions = bnode.tree.a_labels[action_indices]
+        if !isempty(tried_actions) && length(tried_actions) != length(Ab)
+            for (i,a) in enumerate(tried_actions)
+                for (j,ab) in enumerate(Ab)
+                    if a == ab
+                        p[j] = 1e-6 # zero-out
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    p = normalize(p, 1) # re-normalize to sum to 1
+
+    if nn_params.use_epsilon_greedy && rand() < nn_params.ϵ_greedy
+        return rand(Ab)
+    else
+        if nn_params.next_action_return_argmax
+            return Ab[argmax(p)]
+        else
+            return rand(SparseCat(Ab, p))
+        end
+    end
 end
 
 

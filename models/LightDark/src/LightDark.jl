@@ -2,7 +2,6 @@ module LightDark
 
 using Distributions
 using Parameters
-using ParticleFilters
 using POMDPModels
 using POMDPTools
 using POMDPs
@@ -11,9 +10,7 @@ using Random
 export
     LightDarkPOMDP,
     LightDarkState,
-    LDNormalStateDist,
-    ParticleHistoryBelief,
-    ParticleHistoryBeliefUpdater
+    LDNormalStateDist
 
 """
     LightDarkState
@@ -92,39 +89,6 @@ end
 
 POMDPs.convert_s(::Type{A}, s::LightDarkState, p::LightDarkPOMDP) where A<:AbstractArray = eltype(A)[s.status, s.y]
 POMDPs.convert_s(::Type{LightDarkState}, s::A, p::LightDarkPOMDP) where A<:AbstractArray = LightDarkState(Int64(s[1]), s[2])
-
-@with_kw mutable struct ParticleHistoryBelief
-    particles::ParticleCollection
-    observations::Vector = []
-    actions::Vector = []
-end
-
-@with_kw mutable struct ParticleHistoryBeliefUpdater <: Updater
-    pf::Updater
-end
-
-function POMDPs.update(up::ParticleHistoryBeliefUpdater, b::ParticleHistoryBelief, a, o)
-    particles = update(up.pf, b.particles, a, o)
-    observations = push!(deepcopy(b.observations), o)
-    actions = push!(deepcopy(b.actions), a)
-    return ParticleHistoryBelief(particles, observations, actions)
-end
-
-function POMDPs.initialize_belief(up::ParticleHistoryBeliefUpdater, d)
-    particles = initialize_belief(up.pf, d)
-    return ParticleHistoryBelief(; particles)
-end
-
-function Base.rand(rng::AbstractRNG, b::ParticleHistoryBelief, n::Integer=1)
-    if n == 1
-        return rand(rng, particles(b))
-    else
-        return rand(rng, particles(b), n)
-    end
-end
-
-ParticleFilters.particles(b::ParticleHistoryBelief) = particles(b.particles)
-ParticleFilters.support(b::ParticleHistoryBelief) = particles(b)
 
 POMDPs.initialstate_distribution(pomdp::LightDarkPOMDP; kwargs...) = initialstate(pomdp; kwargs...) # deprecated in POMDPs v0.9
 

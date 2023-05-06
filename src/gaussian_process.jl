@@ -291,7 +291,7 @@ end
 """
 Gaussian process look-up/evaluation.
 """
-function value_lookup(belief, f::GPSurrogate)
+function value_lookup(f::GPSurrogate, belief)
     x = Float64.(input_representation(belief))
     y = f(x) # evaluate GP `f`
     return y[1]
@@ -301,7 +301,7 @@ end
 """
 Evaluate the Gaussian process `f` using the `belief` as input, return the predicted policy vector.
 """
-function policy_lookup(belief, f::GPSurrogate)
+function policy_lookup(f::GPSurrogate, belief)
     x = Float64.(input_representation(belief))
     y = f(x) # evaluate GP `f`
     return y[2:end]
@@ -312,7 +312,7 @@ end
 Use predicted policy vector to sample next action.
 """
 function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::GPSurrogate)
-    p = policy_lookup(belief, f)
+    p = policy_lookup(f, belief)
     as = POMDPs.actions(problem) # TODO: actions(problem, belief) ??
     return rand(SparseCat(as, p))
 end

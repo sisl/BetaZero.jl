@@ -1,3 +1,4 @@
+using ParticleBeliefs
 using LocalApproximationValueIteration
 using LocalFunctionApproximation
 using GridInterpolations

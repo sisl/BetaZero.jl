@@ -5,8 +5,7 @@ version = "0.1.0"
 
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
-POMCPOW = "4c53ee00-974c-466f-8fa5-8dd73959bbab"
+MineralExploration = "8a34a384-1fed-11ec-9621-0242ac130002"
 POMDPTools = "7588e00f-9cae-40de-98dc-e0c70c48cdd7"
 POMDPs = "a93abf59-7444-517b-a68a-c42f96afdd7d"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"

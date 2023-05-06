@@ -20,6 +20,43 @@ Load policy from file (MCTS planner and surrogate objects together).
 """
 function load_policy(filename::String)
     BSON.@load "$filename" policy
+
+    # Handle anonymous function serialization issues
+    network = policy.surrogate
+    normalize_input = policy.parameters.nn_params.normalize_input
+    normalize_output = policy.parameters.nn_params.normalize_output
+
+    if normalize_input
+        infunc = network.layers[1]
+        mean_x = infunc.mean_x.contents
+        std_x = infunc.std_x.contents
+        ϵ_std = infunc.ϵ_std
+        normalize_x = x -> (x .- mean_x) ./ (std_x .+ ϵ_std)
+        heads = network.layers[end]
+    end
+
+    if normalize_output
+        vhf = network.layers[end].layers.value_head.layers[end]
+        mean_y = vhf.mean_y.contents
+        std_y = vhf.std_y.contents
+        unnormalize_y = y -> (y .* std_y) .+ mean_y
+
+        heads = network.layers[end]
+        value_head = heads.layers.value_head
+        value_head = Chain(value_head.layers[1:end-1]..., unnormalize_y) # NOTE end-1 to remove it first.
+        policy_head = heads.layers.policy_head
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+    end
+
+    if normalize_input
+        network = Chain(normalize_x, network.layers[2:end-1]..., heads)
+    end
+
+    if normalize_output
+        network = Chain(network.layers[1:end-1]..., heads)
+    end
+
+    policy.surrogate = network
     return policy
 end
 
@@ -27,8 +64,8 @@ end
 """
 Save just the surrogate model to a file.
 """
-function save_surrogate(policy::BetaZeroPolicy, filename::String)
-    surrogate = policy.surrogate
+save_surrogate(policy::BetaZeroPolicy, filename::String)
+function save_surrogate(surrogate::Surrogate, filename::String)
     BSON.@save "$filename" surrogate
 end
 
@@ -56,4 +93,69 @@ Load the solver from a file.
 function load_solver(filename::String)
     BSON.@load "$filename" solver
     return solver
+end
+
+
+"""
+Save off policy during BetaZero iterations.
+"""
+function incremental_save(solver::BetaZeroSolver, f::Surrogate, i="")
+    if solver.nn_params.incremental_save
+        filename = solver.nn_params.policy_filename
+        file, ext = splitext(filename)
+        filename = string(file, "_$i", ext)
+
+        policy = solve_planner!(solver, f)
+        parameters = policy.parameters
+        surrogate = policy.surrogate
+        cache = (surrogate, parameters)
+
+        BSON.@save "$filename" cache
+    end
+end
+
+
+"""
+Load incremental network. Return (; network, parameters)
+"""
+function load_incremental(filename::String)
+    BSON.@load "$filename" cache
+    network = cache[1]
+    parameters = cache[2]
+
+    # Handle anonymous function serialization issues
+    normalize_input = parameters.nn_params.normalize_input
+    normalize_output = parameters.nn_params.normalize_output
+
+    if normalize_input
+        infunc = network.layers[1]
+        mean_x = infunc.mean_x.contents
+        std_x = infunc.std_x.contents
+        ϵ_std = infunc.ϵ_std
+        normalize_x = x -> (x .- mean_x) ./ (std_x .+ ϵ_std)
+        heads = network.layers[end]
+    end
+
+    if normalize_output
+        vhf = network.layers[end].layers.value_head.layers[end]
+        mean_y = vhf.mean_y.contents
+        std_y = vhf.std_y.contents
+        unnormalize_y = y -> (y .* std_y) .+ mean_y
+
+        heads = network.layers[end]
+        value_head = heads.layers.value_head
+        value_head = Chain(value_head.layers[1:end-1]..., unnormalize_y) # NOTE end-1 to remove it first.
+        policy_head = heads.layers.policy_head
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+    end
+
+    if normalize_input
+        network = Chain(normalize_x, network.layers[2:end-1]..., heads)
+    end
+
+    if normalize_output
+        network = Chain(network.layers[1:end-1]..., heads)
+    end
+
+    return (; network, parameters)
 end

@@ -1,2 +1,8 @@
 Manifest.toml
 *.bson
+tex/*.pdf
+tex/*.aux
+tex/*.log
+tex/data
+scratch
+notes

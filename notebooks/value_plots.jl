@@ -49,6 +49,8 @@ end
 begin
 	pkg"dev ../models/LightDark/"
 	using LightDark
+	pkg"dev ../models/ParticleBeliefs/"
+	using ParticleBeliefs
 end
 
 # ╔═╡ 5a5c8125-d8ed-4664-b5a2-a20819a81920
@@ -107,7 +109,7 @@ function ingredients(path::String)
 end
 
 # ╔═╡ 48ad6bac-68da-4742-a789-2e5e5b8eed10
-LightDarkBetaZero = ingredients("../scripts/lightdark_representation.jl")
+LightDarkBetaZero = ingredients("../scripts/representation_lightdark.jl")
 
 # ╔═╡ 0c73c232-95a7-4883-811f-614e676e142a
 lightdark_belief_reward = LightDarkBetaZero.lightdark_belief_reward
@@ -118,7 +120,8 @@ begin
 	Core.eval(Main, :(using NNlib))
 	Core.eval(Main, :(using Flux))
 	Core.eval(Main, :(using LightDark))
-	Core.eval(Main, :(include("../scripts/lightdark_representation.jl")))	
+	Core.eval(Main, :(using ParticleBeliefs))
+	Core.eval(Main, :(include("../scripts/representation_lightdark.jl")))	
 	Core.eval(Main, :(using MCTS))
 	Core.eval(Main, :(using Random))
 	Core.eval(Main, :(using DataStructures))

@@ -127,30 +127,68 @@ function plot_metric(solver::BetaZeroSolver;
                      title=ylabel,
                      include_holdout=false,
                      include_data_gen=true,
+                     relative_to_optimal=true, # NOTE! TODO: parameterize in solver
+                     apply_rolling_mean=false, # NOTE! TODO: parameterize in solver
+                     apply_smoothing=true, # TODO: Parameterize
+                     use_percentiles=true, # TODO!!!
                      expert_results=nothing, # [mean, std]
                      expert_label="expert")
 
     if metric == :accuracies
-        ho_results = [mean_and_std(getfield(m, metric)) for m in solver.holdout_metrics]
-        ho_μ = first.(ho_results)
-        ho_σ = last.(ho_results)
+        if include_holdout
+            ho_results = [mean_and_std(getfield(m, metric)) for m in solver.holdout_metrics]
+            ho_μ = first.(ho_results)
+            ho_σ = last.(ho_results)
+            if apply_rolling_mean
+                ho_μ = rolling_mean(ho_μ)
+            end
+        end
         pm_x_over_time = accuracy_over_time
     elseif metric == :returns
-        ho_μ = [m.mean for m in solver.holdout_metrics]
-        ho_σ = [m.std for m in solver.holdout_metrics]
-        pm_x_over_time = returns_over_time
+        if include_holdout
+            if relative_to_optimal
+                ho_μ = [mean([m.returns[i] - m.optimal_returns[i] for i in  eachindex(m.returns)]) for m in solver.holdout_metrics]
+                ho_σ = [std([m.returns[i] - m.optimal_returns[i] for i in eachindex(m.returns)]) for m in solver.holdout_metrics]
+            else
+                ho_μ = [m.mean for m in solver.holdout_metrics]
+                ho_σ = [m.std for m in solver.holdout_metrics]
+            end
+            if apply_rolling_mean
+                ho_μ = rolling_mean(ho_μ)
+            end
+        end
+        if relative_to_optimal
+            pm_x_over_time = relative_returns_over_time
+            ylabel = "(relative) $ylabel"
+            title = "(relative) $title"
+        else
+            pm_x_over_time = returns_over_time
+        end
     else
         error("`plot_metric` not yet defined for metric $metric")
     end
 
-    n_ho = solver.params.n_holdout
-    ho_stderr = ho_σ ./ sqrt(n_ho)
+    if include_holdout
+        n_ho = solver.params.n_holdout
+        if apply_rolling_mean
+            ho_stderr = rolling_stderr(ho_μ)
+            ho_stderr[1] = 0 # NaN
+        else
+            ho_stderr = ho_σ ./ sqrt(n_ho)
+        end
+    end
 
     pm_results = pm_x_over_time(solver, mean_and_std)
     pm_μ = first.(pm_results)
     pm_σ = last.(pm_results)
 	n_pm = solver.params.n_data_gen
     pm_stderr = pm_σ ./ sqrt(n_pm)
+
+    if apply_rolling_mean
+        pm_μ = rolling_mean(pm_μ)
+        pm_stderr = rolling_stderr(pm_μ)
+        pm_stderr[1] = 0 # NaN
+    end
 
     plot(title=title, ylabel=ylabel, xlabel=xlabel, legend=:bottomright)
 
@@ -162,7 +200,14 @@ function plot_metric(solver::BetaZeroSolver;
         else
             pm_X = eachindex(pm_μ)
         end
-        plot!(pm_X, pm_μ, ribbon=pm_stderr, fillalpha=0.2, lw=2, marker=length(pm_μ)==1, label="BetaZero (data collection)", c=:crimson, alpha=0.5)
+        pm_color = :crimson
+        pm_label = "BetaZero (data collection)"
+        if apply_smoothing && !apply_rolling_mean && length(pm_μ) > 1
+            plot!(pm_X, pm_μ, alpha=0.3, color=pm_color, label=false)
+            plot!(pm_X, smooth(pm_μ), color=pm_color, label=pm_label, linewidth=2, fillalpha=0.2, ribbon=smooth(pm_stderr), alpha=0.8)
+        else
+            plot!(pm_X, pm_μ, ribbon=pm_stderr, fillalpha=0.2, lw=2, marker=length(pm_μ)==1, label=pm_label, c=pm_color, alpha=0.5)
+        end
     end
 
     local ho_X = [1]
@@ -173,21 +218,29 @@ function plot_metric(solver::BetaZeroSolver;
         else
             ho_X = eachindex(ho_μ)
         end
-        plot!(ho_X, ho_μ, ribbon=ho_stderr, fillalpha=0.1, marker=length(ho_μ)==1, lw=1, label="BetaZero (holdout)", c=:darkgreen)
+        ho_color = :darkgreen
+        ho_label = "BetaZero (holdout)"
+        if apply_smoothing && !apply_rolling_mean && length(ho_μ) > 1
+            plot!(ho_X, ho_μ, alpha=0.3, color=ho_color, label=false)
+            plot!(ho_X, smooth(ho_μ), color=ho_color, label=ho_label, linewidth=2, fillalpha=0.2, ribbon=smooth(ho_stderr), alpha=0.8)
+        else
+            plot!(ho_X, ho_μ, ribbon=ho_stderr, fillalpha=0.1, lw=2, marker=length(ho_μ)==1, label=ho_label, c=ho_color, alpha=0.5)
+        end
+
     end
 
     if !isnothing(expert_results)
-        expert_means, expert_stds = expert_results
-        hline!([expert_means...], ribbon=expert_stds, fillalpha=0.2, ls=:dash, lw=1, c=:black, label=expert_label)
+        expert_means, expert_stderr = expert_results
+        hline!([expert_means...], ribbon=expert_stderr, fillalpha=0.2, ls=:dash, lw=1, c=:black, label=expert_label)
     end
 
-    if length(pm_μ) != solver.params.n_iterations
-        # Currently running, make x-axis span entire iteration domain
-        if xaxis_simulations
-            xlims!(min(ho_X[1], pm_X[1]), count_simulations(solver))
-        else
-            xlims!(1, solver.params.n_iterations)
-        end
+    # Currently running, make x-axis span entire iteration domain
+    if xaxis_simulations
+        xlims!(min(ho_X[1], pm_X[1]), count_simulations(solver))
+    else
+        # TODO: Handle `resume`
+        additional_iterations = 0 # 20
+        xlims!(1, max(solver.params.n_iterations, length(pm_X)))
     end
 
     if metric == :accuracies
@@ -200,8 +253,8 @@ end
 plot_accuracy(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:accuracies, ylabel="accuracy", kwargs...)
 plot_returns(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:returns, ylabel="returns", kwargs...)
 function plot_accuracy_and_returns(solver::BetaZeroSolver; expert_accuracy=solver.expert_results.expert_accuracy, expert_returns=solver.expert_results.expert_returns, kwargs...)
-    plt_accuracy = plot_accuracy(solver; kwargs..., expert_results=expert_accuracy, expert_label=solver.expert_results.expert_label)
-    plt_returns = plot_returns(solver; kwargs..., expert_results=expert_returns, expert_label=solver.expert_results.expert_label)
+    plt_accuracy = plot_accuracy(solver; expert_results=expert_accuracy, expert_label=solver.expert_results.expert_label, kwargs...)
+    plt_returns = plot_returns(solver; expert_results=expert_returns, expert_label=solver.expert_results.expert_label, kwargs...)
     return plot(plt_accuracy, plt_returns, layout=2, size=(1000,300), margin=5Plots.mm)
 end
 
@@ -214,7 +267,7 @@ function plot_data_gen(solver::BetaZeroSolver;
                        yrange=range(-20, 20, length=100),
                        flip_axes::Bool=true,
                        subplots::Bool=true,
-                       cmap=:viridis,
+                       cmap=nothing,
                        xlabel="\$\\sigma(b)\$",
                        ylabel="\$\\mu(b)\$",
                        title="training data")
@@ -225,9 +278,12 @@ function plot_data_gen(solver::BetaZeroSolver;
     X2 = flip_axes ? data.X[1,:] : data.X[2,:]
     V = data.Y[1,:]
 
-    cmap = shifted_colormap(V)
-    cmap_values = [get(cmap, normalize01(v,V)) for v in V]
-    figure = scatter(X1, X2, label=false, xlabel=xlabel, ylabel=ylabel, title=title, cmap=cmap_values, ms=2, alpha=0.2)
+    if isnothing(cmap)
+        cmap_gradient = shifted_colormap(V)
+        cmap = [get(cmap_gradient, normalize01(v,V)) for v in V]
+    end
+
+    figure = scatter(X1, X2, label=false, xlabel=xlabel, ylabel=ylabel, title=title, cmap=cmap, ms=2, alpha=0.2)
     xlims!(xrange[1], xrange[end])
     ylims!(yrange[1], yrange[end])
 
@@ -244,7 +300,7 @@ function plot_data_gen(solver::BetaZeroSolver;
         sidefig = Plots.histogram(X2, color=:lightgray, linecolor=:gray, normalize=true, label=nothing, yaxis=nothing, orientation=:h)
         xlims!(0, xlims()[2]) # anchor at zero
         ylims!(current_ylim) # match limits of main plot
-        figure = plot(topfig, figure, sidefig, layout=lay)
+        figure = plot(topfig, figure, sidefig, layout=lay, margin=7Plots.mm)
     end
 
     return figure

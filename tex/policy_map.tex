@@ -1,0 +1,249 @@
+\documentclass[tikz,border=3.14pt]{standalone}
+\usepackage{pgfplots}
+\usepackage{tikz-3dplot}
+\usepackage{xifthen}
+\usepackage{ifthen}
+\pgfplotsset{compat=newest}
+\usetikzlibrary{backgrounds}
+
+\tdplotsetmaincoords{65}{30} % 30 for slight angle, 45 for head on
+
+% \newcommand*{\SHOWLABELS}{}
+% \newcommand*{\SHOWGRID}{}
+\newcommand*{\SHOWMINIAXES}{}
+\newcommand*{\SHOWOUTSIDEBOX}{}
+\newcommand*{\SHOWMAP}{}
+\newcommand*{\SHOWACTION}{}
+
+% https://tex.stackexchange.com/questions/155194/tufte-like-axis-with-pgfplots
+\pgfkeys{/pgfplots/tuftelike/.style={
+  semithick,
+  tick style={major tick length=4pt,semithick,black},
+  separate axis lines,
+  axis x line*=bottom,
+  axis x line shift=5pt,
+  xlabel shift=5pt,
+  axis y line*=left,
+  axis y line shift=5pt,
+  ylabel shift=5pt}}
+
+\newcommand*{\scale}{2}
+\newcommand*{\step}{0.5/\scale}
+
+% https://tex.stackexchange.com/a/166290
+\begin{document}
+
+\pgfplotstableread{data/drills.dat}{\firsttable}
+    \pgfplotstablegetrowsof{data/drills.dat}
+    \pgfmathtruncatemacro{\rows}{\pgfplotsretval-1} % Put the number of row minus one in \rows, to use : \foreach \p in {0,...,\rows}
+
+\pgfmathsetmacro{\Zscale}{10} % adjust maximum z values
+
+% Assign variables min, max
+\pgfplotstablegetelem{0}{[index] 0}\of{\firsttable}
+    \pgfmathsetmacro{\minX}{\pgfplotsretval/\scale}
+\pgfplotstablegetelem{0}{[index] 1}\of{\firsttable}
+    \pgfmathsetmacro{\minY}{\pgfplotsretval/\scale}
+\pgfplotstablegetelem{0}{[index] 2}\of{\firsttable}
+    \pgfmathsetmacro{\minZ}{\pgfplotsretval/\scale}
+\pgfplotstablegetelem{1}{[index] 0}\of{\firsttable}
+    \pgfmathsetmacro{\maxX}{\pgfplotsretval/\scale}
+\pgfplotstablegetelem{1}{[index] 1}\of{\firsttable}
+    \pgfmathsetmacro{\maxY}{\pgfplotsretval/\scale}
+\pgfplotstablegetelem{1}{[index] 2}\of{\firsttable}
+    \pgfmathsetmacro{\maxZ}{\pgfplotsretval/\scale}
+
+\pgfmathsetmacro{\Zceiling}{4/\maxZ/\scale} % contain the values of z between 0 and 4 cm (provided that they are positiv)
+
+
+\ifdefined\SHOWMAP
+    \pgfplotstableread{data/map.dat}{\maptable}
+        \pgfplotstablegetrowsof{data/map.dat}
+        \pgfmathtruncatemacro{\maprows}{\pgfplotsretval-1}
+
+    % Assign variables min and max
+    \pgfplotstablegetelem{0}{[index] 0}\of{\maptable}
+        \pgfmathsetmacro{\minXS}{\pgfplotsretval/\scale}
+    \pgfplotstablegetelem{0}{[index] 1}\of{\maptable}
+        \pgfmathsetmacro{\minYS}{\pgfplotsretval/\scale}
+    \pgfplotstablegetelem{0}{[index] 2}\of{\maptable}
+        \pgfmathsetmacro{\minZS}{\pgfplotsretval/\scale}
+    \pgfplotstablegetelem{1}{[index] 0}\of{\maptable}
+        \pgfmathsetmacro{\maxXS}{\pgfplotsretval/\scale}
+    \pgfplotstablegetelem{1}{[index] 1}\of{\maptable}
+        \pgfmathsetmacro{\maxYS}{\pgfplotsretval/\scale}
+    \pgfplotstablegetelem{1}{[index] 2}\of{\maptable}
+        \pgfmathsetmacro{\maxZS}{\pgfplotsretval/\scale}
+\fi
+
+\pgfplotstableread{data/decisions.dat}{\decisiontable}
+    \pgfplotstablegetelem{0}{[index] 0}\of{\decisiontable}
+        \let\nodecision\pgfplotsretval
+    \pgfplotstablegetelem{0}{[index] 1}\of{\decisiontable}
+        \let\yesdecision\pgfplotsretval
+
+\ifdefined\SHOWACTION
+    \pgfplotstableread{data/action.dat}{\actiontable}
+        \pgfplotstablegetelem{0}{[index] 0}\of{\actiontable}
+            \pgfmathsetmacro{\actionx}{\pgfplotsretval/\scale}
+        \pgfplotstablegetelem{0}{[index] 1}\of{\actiontable}
+            \pgfmathsetmacro{\actiony}{\pgfplotsretval/\scale}
+        \pgfplotstablegetelem{0}{[index] 2}\of{\actiontable}
+            \let\actioninfo\pgfplotsretval
+    \colorlet{actioncolor}[hsb]{red}
+\fi
+
+% Defining by hand the axis
+\begin{tikzpicture}[x={(0cm,-0.5cm)},y={(0cm,0.5cm)},z={(0cm,4 cm)}, line join=round, tdplot_main_coords]
+
+% Defining hsb color to have a color scale
+\colorlet{highcolorbar}[hsb]{teal} % teal
+\colorlet{lowcolorbar}[hsb]{lime} % lime
+
+\definecolor{viridis_yellow}{HTML}{fde725}
+\definecolor{viridis_blue}{HTML}{440154}
+\colorlet{highcolormap}[hsb]{black} % viridis_yellow
+\colorlet{lowcolormap}[hsb]{white} % viridis_blue
+
+\ifdefined\SHOWMINIAXES
+    % Drawing the system of axes
+    \draw[-stealth] (0,0,0) -- (1,0,0) node [black,below left] {$x$};
+    \draw[-stealth] (0,0,0) -- (0,1,0) node [black,above left,yshift=-1mm] {$y$};
+    \draw[-stealth] (0,0,0) -- (0,0,1) node [black,left] {$p$};
+\fi
+
+% Write unit on x and y
+\foreach \p in {2,...,\maxX}{ % NOTE: start at 2 not 0 (skip min and max)
+    \ifdefined\SHOWLABELS
+        \draw {(\p,-\step/2,0)} node[right, gray] {\p}; % x-axis label
+    \fi
+    \ifdefined\SHOWGRID
+        % Draw the grid
+        \foreach \q in {2,...,\maxY}{ % NOTE: start at 2 not 0 (skip min and max)
+            \draw[lightgray] (\p-\step,\q-\step,0) -- (\p+\step,\q-\step,0) -- (\p+\step,\q+\step,0) -- (\p-\step,\q+\step,0) -- (\p-\step,\q-\step,0);
+        }
+    \fi
+}
+
+\ifdefined\SHOWLABELS
+    % y-axis label
+    \foreach \p in {2,...,\maxY}{
+        \draw {(\maxX+2.5*\step,\p,0)} node[left, gray] {$\p$};
+    }
+\fi
+
+\ifdefined\SHOWMAP
+    % Draw map on the bottom
+    \foreach \p in {2,...,\maprows}{ % NOTE: start at 2 not 0 (skip min and max)
+        \pgfplotstablegetelem{\p}{[index] 0}\of{\maptable}    % The order in which the bars are drawn is determined by the order of the lines in the data file.
+        \pgfmathsetmacro{\x}{\pgfplotsretval/\scale}
+        \pgfplotstablegetelem{\p}{[index] 1}\of{\maptable}    % And as the drawings just pile up, the last one just goes on top of the previous drawings.
+        \pgfmathsetmacro{\y}{\pgfplotsretval/\scale}
+        \pgfplotstablegetelem{\p}{[index] 2}\of{\maptable}    % The order here works with chosen view angle, if you change the angle, you might have to change it.
+        \pgfmathsetmacro{\z}{\pgfplotsretval/\scale}
+
+        \pgfmathsetmacro{\w}{\step + 0.05/\scale} % half the width of the bars (plus some padding to cover grid area)
+
+        \pgfmathtruncatemacro{\teinte}{100-(((\z-\minZS)/(\maxZS-\minZS))*100)}
+        \colorlet{colour}[rgb]{lowcolormap!\teinte!highcolormap}
+
+        % Bottom heatmap / state (bottom face)
+        \fill[colour] (\x-\w,\y-\w,0) -- (\x-\w,\y+\w,0) -- (\x+\w,\y+\w,0) -- (\x+\w,\y-\w,0) -- (\x-\w,\y-\w,0);
+    }
+\fi
+
+
+\ifdefined\SHOWOUTSIDEBOX
+    \draw[black, line width=0.25mm, line join=round] (\step,\step,0) -- (\maxX+\step,\step,0) -- (\maxX+\step,\maxY+\step,0) -- (\step,\maxY+\step,0) -- (\step,\step,0);
+\fi
+
+
+% Plot vertical probability bars
+\foreach \p in {2,...,\rows}{ % NOTE: start at 2 not 0 (skip min and max)
+        \pgfplotstablegetelem{\p}{[index] 0}\of{\firsttable}    % The order in which the bars are drawn is determined by the order of the lines in the data file.
+        \pgfmathsetmacro{\x}{\pgfplotsretval/\scale}
+        \pgfplotstablegetelem{\p}{[index] 1}\of{\firsttable}    % And as the drawings just pile up, the last one just goes on top of the previous drawings.
+        \pgfmathsetmacro{\y}{\pgfplotsretval/\scale}
+        \pgfplotstablegetelem{\p}{[index] 2}\of{\firsttable}    % The order here works with chosen view angle, if you change the angle, you might have to change it.
+        \pgfmathsetmacro{\z}{\pgfplotsretval/\scale}
+
+        \pgfmathsetmacro{\w}{\step} % half the width of the bars
+
+        % \ifnum0<\z % TODO: Only plot non-zero actions
+            \pgfmathtruncatemacro{\teinte}{100-((\z/\maxZ)*100)}
+            \colorlet{colour}[rgb]{lowcolorbar!\teinte!highcolorbar}
+
+            % Unseen faces from orginal view, but if you change the angle ....
+            % \fill[colour] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x-\w,\y+\w,0) -- (\x-\w,\y-\w,0) -- (\x-\w,\y-\w,\z);
+            % \draw[black] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x-\w,\y+\w,0) -- (\x-\w,\y-\w,0) -- (\x-\w,\y-\w,\z);
+            % \fill[colour] (\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y+\w,0) -- (\x-\w,\y+\w,0) -- (\x-\w,\y+\w,\z);
+            % \draw[black](\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y+\w,0) -- (\x-\w,\y+\w,0) -- (\x-\w,\y+\w,\z);
+
+            % Visible faces from original view
+            \fill[colour] (\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x+\w,\y-\w,0) -- (\x+\w,\y+\w,0) -- (\x+\w,\y+\w,\z);
+            \draw[black](\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x+\w,\y-\w,0) -- (\x+\w,\y+\w,0) -- (\x+\w,\y+\w,\z);
+
+            \fill[colour!60!gray] (\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z) -- (\x-\w,\y-\w,0) -- (\x+\w,\y-\w,0) -- (\x+\w,\y-\w,\z);
+            \draw[black](\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z) -- (\x-\w,\y-\w,0) -- (\x+\w,\y-\w,0) -- (\x+\w,\y-\w,\z);
+
+            % Top face
+            \pgfmathparse{\actionx==\x && \actiony==\y}
+            \ifnum\pgfmathresult=1
+                \fill[top color=actioncolor!40!gray, bottom color=actioncolor!80!gray] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z);
+            \else
+                \fill[top color=colour!40!gray, bottom color=colour!80!gray] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z);
+            \fi
+
+            \draw[black] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z);
+        % \fi
+}
+
+\ifthenelse{\equal{\actioninfo}{abandon}}
+{
+    \colorlet{nocolor}{red}
+    \colorlet{yescolor}{brown}
+}{
+    \ifthenelse{\equal{\actioninfo}{mine}}
+    {
+        \colorlet{nocolor}{brown}
+        \colorlet{yescolor}{red}    
+    }{
+        \colorlet{nocolor}{brown}
+        \colorlet{yescolor}{brown}    
+    }
+}
+
+
+\begin{axis}[
+    tuftelike,
+    xbar,
+    at={(2cm,-4cm)},
+    y=-0.5cm,
+    bar width=0.3cm,
+    bar shift=0pt,
+    xmin=0,
+    enlarge y limits={abs=0.45cm},
+    xlabel={probability},
+    symbolic y coords={abandon,mine},
+    every axis plot/.append style={
+        ytick=data,
+    },
+    x tick label style={
+        /pgf/number format/.cd,
+            fixed,
+            fixed zerofill,
+            precision=2,
+        /tikz/.cd
+    },
+    nodes near coords, nodes near coords align={horizontal},
+]
+\addplot[nocolor!20!black, fill=nocolor!80!white] table[col sep=comma,header=false] {
+\nodecision,abandon
+};
+\addplot[yescolor!20!black, fill=yescolor!80!white] table[col sep=comma,header=false] {
+\yesdecision,mine
+};
+\end{axis}
+
+\end{tikzpicture}
+\end{document}

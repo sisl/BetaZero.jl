@@ -6,6 +6,8 @@ using POMDPs
 using POMDPTools
 using Random
 using StatsBase
+using ColorSchemes
+
 
 # seed=3348096912 (reversal)
 function plot_lightdark(pomdp::LightDarkPOMDP, policy::Policy, up::Updater; max_steps=20, seed=rand(1:typemax(UInt32)))
@@ -13,8 +15,8 @@ function plot_lightdark(pomdp::LightDarkPOMDP, policy::Policy, up::Updater; max_
     @info "seed = $seed"
 
     ds0 = initialstate(pomdp)
+    s0 = rand(ds0)
     b0 = initialize_belief(up, ds0)
-    s0 = rand(b0)
     S = [s0]
     A = [0.0]
     O = [0.0]
@@ -33,7 +35,7 @@ function plot_lightdark(pomdp::LightDarkPOMDP, policy::Policy, up::Updater; max_
 
     if hasproperty(policy, :surrogate)
         G = BetaZero.compute_returns(R; γ=POMDPs.discount(pomdp))
-        Ṽ = [Float64(BetaZero.value_lookup(b, policy.surrogate)) for b in B]
+        Ṽ = [Float64(BetaZero.value_lookup(policy.surrogate, b)) for b in B]
         value_mae = mean(abs.(G .- Ṽ))
         @info "Value estimate MAE: $(round(value_mae, digits=4))"
     end
@@ -50,14 +52,13 @@ function plot_lightdark(pomdp::LightDarkPOMDP, policy::Policy, up::Updater; max_
         return plot!()
     end
 
-    # using ColorSchemes
     Y = map(s->s.y, S)
     Ỹ = map(b->mean(p.y for p in ParticleFilters.particles(b)), B)
-    ymax = max(max_steps, max(maximum(Y), abs(minimum(Y))))*1.5
+    ymax = max(30, max(maximum(Y), abs(minimum(Y))))*1.5
     xmax = max(length(S), max_steps)
     plt_lightdark = plot(xlims=(1, xmax), ylims=(-ymax, ymax), size=(700,300), margin=7Plots.mm, left_margin=20Plots.mm, legend=:outertop, xlabel="time", ylabel="state")
     heatmap!(1:xmax, range(-ymax, ymax, length=100), (x,y)->sqrt(std(observation(pomdp, LightDarkState(0, y)))), c=:grayC)
-    hline!([0], c=:green, style=:dash, label="goal")
+    hline!([0], c=:green, lw=1, label="goal")
     plot_beliefs(B; hold=true)
     plot!(eachindex(S), Y, c=:red, lw=2, label="trajectory", alpha=0.5)
     plot!(eachindex(S), Ỹ, c=:blue, lw=1, ls=:dash, label="believed traj.", alpha=0.5)

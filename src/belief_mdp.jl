@@ -12,16 +12,19 @@ end
 function BeliefMDP(pomdp::P, up::U, belief_reward) where {P<:POMDP, U<:Updater}
     # XXX hack to determine belief type
     b0 = initialize_belief(up, initialstate(pomdp))
-    BeliefMDP{P, U, typeof(b0), actiontype(pomdp)}(pomdp, up, belief_reward)
+    # BeliefMDP{P, U, typeof(b0), actiontype(pomdp)}(pomdp, up, belief_reward)
+    BeliefMDP{P, U, Any, actiontype(pomdp)}(pomdp, up, belief_reward)
 end
 
 function POMDPs.gen(bmdp::BeliefMDP, b, a, rng::AbstractRNG)
     s = rand(rng, b) # NOTE: Different than Josh's implementation
+    # TODO: Note this change.
+    # s = mean(b)
     if isterminal(bmdp.pomdp, s)
         bp = bmdp_handle_terminal(bmdp.pomdp, bmdp.updater, b, s, a, rng::AbstractRNG)::typeof(b)
         return (sp=bp, r=0.0)
     end
-    sp, o, r = @gen(:sp, :o, :r)(bmdp.pomdp, s, a, rng) # maybe this should have been generate_or?
+    sp, o = @gen(:sp, :o)(bmdp.pomdp, s, a, rng) # maybe this should have been generate_or?
     bp = update(bmdp.updater, b, a, o)
     r = bmdp.belief_reward(bmdp.pomdp, b, a, bp)
     return (sp=bp, r=r)

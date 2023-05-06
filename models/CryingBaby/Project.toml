@@ -1,0 +1,10 @@
+name = "CryingBaby"
+uuid = "70d07a6e-8df7-4eb2-a05c-d64cb2247425"
+authors = ["Robert Moss <rmoss92@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+POMDPTools = "7588e00f-9cae-40de-98dc-e0c70c48cdd7"
+POMDPs = "a93abf59-7444-517b-a68a-c42f96afdd7d"
+QuickPOMDPs = "8af83fb2-a731-493c-9049-9e19dbce6165"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
