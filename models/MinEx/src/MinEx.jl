@@ -20,9 +20,6 @@ export
     MinExHeuristicPolicy
 
 
-include("utils.jl")
-
-
 mutable struct MinExState
     ore::Matrix{Float32}
     drill_locations::Vector{Tuple{Int, Int}}

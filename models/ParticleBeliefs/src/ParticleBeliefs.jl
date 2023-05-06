@@ -2,6 +2,7 @@ module ParticleBeliefs
 
 using Reexport
 using Parameters
+using Random
 @reexport using ParticleFilters
 @reexport using POMDPs
 

@@ -28,11 +28,10 @@ end
 """
 Sync code from main server to other host servers.
 """
-function sync_code(machine_specs::Vector)
+function sync_code(machine_specs::Vector, dir::String)
     for ms in machine_specs
         host, _ = ms
-        dir = abspath(@__DIR__)
-        @info "Syncing code to $host:$dir/..."
+        @info "Syncing code to $host:$dir..."
         run(Cmd(["sh", "-c", "scp -r $dir/* $host:$dir/"]))
     end
 end

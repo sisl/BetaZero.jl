@@ -73,8 +73,8 @@ pomcpow_planner = solve(pomcpow_solver, pomdp)
 # Important: resolve/update internal planner parameters
 # policy = BetaZero.solve_planner!(solver, policy.surrogate)
 
-# local up = BootstrapFilter(pomdp, pomdp.N)
-# up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, pomdp.N))
+# local up = BootstrapFilter(pomdp, pomdp.n_particles)
+# up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, pomdp.n_particles))
 # solver.updater = up
 # solver.bmdp = nothing
 # policy = BetaZero.solve_planner!(solver, policy.surrogate)

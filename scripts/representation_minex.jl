@@ -2,7 +2,6 @@ using Revise
 using BetaZero
 using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 using ParticleFilters
-using POMCPOW
 using POMDPs
 using POMDPTools
 using LinearAlgebra
@@ -11,7 +10,7 @@ using StatsBase
 using MinEx
 
 pomdp = MinExPOMDP()
-up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, pomdp.N))
+up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, pomdp.n_particles))
 
 function simple_minex_accuracy_func(pomdp::POMDP, b0, s0, states, actions, returns)
     massive = MinEx.calc_massive(pomdp, s0)

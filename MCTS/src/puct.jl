@@ -153,9 +153,9 @@ end
 """
 State progressive widening.
 """
-function state_widen!(dpw, tree, sol, sanode, s, a, d)
+function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
     new_node = false
-    if (dpw.solver.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
+    if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
         sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
 
         if sol.check_repeat_state && haskey(tree.s_lookup, sp)
@@ -188,7 +188,7 @@ end
 
 
 
-function add_state!(sol, tree, sanode, sp, r)
+function add_state!(sol::PUCTSolver, tree, sanode, sp, r)
     new_node = false
     if sol.check_repeat_state && haskey(tree.s_lookup, sp)
         spnode = tree.s_lookup[sp]
@@ -257,7 +257,6 @@ function best_sanode_Q_and_counts(tree::PUCTTree, snode::Int)
 end
 
 
-normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))
 normalize_q(q, Q) = normalize01(q, Q)
 
 """

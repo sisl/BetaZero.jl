@@ -3,23 +3,23 @@ module BetaZero
 using Reexport
 @reexport using BSON
 @reexport using DataStructures
-using Distributions
-using Distributed
 @reexport using Flux
 @reexport using Flux.NNlib
 @reexport using Flux.MLUtils
-using Metalhead
 @reexport using GaussianProcesses
+@reexport using MCTS
+@reexport using Plots; default(fontfamily="Computer Modern", framestyle=:box)
+@reexport using POMDPs
+@reexport using Random
+using Distributions
+using Distributed
+using Metalhead
 using JLD2
 using LinearAlgebra
-@reexport using MCTS
 using Optim
-@reexport using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 using Parameters
-@reexport using POMDPs
 using POMDPTools
 using ProgressMeter
-@reexport using Random
 using Statistics
 using StatsBase
 using Suppressor
@@ -308,7 +308,7 @@ function store_metrics!(solver::BetaZeroSolver, metrics)
     # Plot incremental learning
     if solver.plot_incremental_data_gen
         performance_plot = plot_accuracy_and_returns(solver; include_holdout=solver.plot_incremental_holdout)
-        solver.save_plots && Plots.savefig(solver.params.plot_metrics_filename)
+        solver.save_plots && Plots.savefig(solver.plot_metrics_filename)
         solver.display_plots && display(performance_plot)
     end
 end

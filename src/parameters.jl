@@ -55,7 +55,7 @@ Parameters for neural network surrogate model.
     use_epsilon_greedy::Bool = false # Use epsilon-greedy exploration during action widening
     ϵ_greedy::Float64 = 0.0 # Epsilon parameter to select random action during widening with probability ϵ_greedy
     classification_loss_weight::Float32 = 0.5f0 # Weight applied to the classification (policy) component of the loss function
-    use_lk_loss::Bool = false # Use KL-divergence as classification (policy) loss (for Gumbel solver)
+    use_kl_loss::Bool = false # Use KL-divergence as classification (policy) loss (for Gumbel solver)
     incremental_save::Bool = false # Incrementally save off policy every iteration (TODO: fix undefined reference error)
     policy_filename::String = "betazero_policy.bson" # Filename when incrementally saving off poliy
     device = gpu # Indicate what device to train on (`gpu` or `cpu`)

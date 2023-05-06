@@ -22,3 +22,5 @@ function ranked_actions(tree::DPWTree, state)
     tuples = [(tree.a_labels[n], tree.q[n]) for n in sanodes]
     return sort!(tuples, by=last, rev=true)
 end
+
+normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))

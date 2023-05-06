@@ -20,8 +20,6 @@ num_action_expansions = 4
 num_state_expansions = 200
 use_state_pw = true
 
-normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))
-
 function invert_softmax(p)
     ϵ = 1f-45
     c = (1 - sum(log.(max.(ϵ, p)))) / length(p)
@@ -371,14 +369,6 @@ function valid_action_indices(mdp::MDP, s)
         end
         return idx
     end
-end
-
-
-"""
-Return the best action from the root node using Squential Halving.
-"""
-function select_root_action(tree::GumbelTree, snode::Int)
-
 end
 
 

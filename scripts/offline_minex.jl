@@ -35,9 +35,9 @@ solver.mcts_solver = PUCTSolver(n_iterations=50,
 
 # Neural network parameters
 solver.nn_params.use_cnn = true
-solver.nn_params.training_epochs = 100
+solver.nn_params.training_epochs = 10 # 100
 solver.nn_params.n_samples = 20_000
-solver.nn_params.learning_rate = 1e-6
+solver.nn_params.learning_rate = 1e-5 # 1e-6
 solver.nn_params.λ_regularization = 1e-4
 solver.nn_params.batchsize = 1024
 solver.nn_params.layer_size = 256
