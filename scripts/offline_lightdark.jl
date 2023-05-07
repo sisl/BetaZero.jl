@@ -25,11 +25,11 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         accuracy_func=lightdark_accuracy_func)
 
 # Neural network
-solver.nn_params.training_epochs = 100
-solver.nn_params.n_samples = 50_000
+solver.nn_params.training_epochs = 50 # 100
+solver.nn_params.n_samples = 100_000 # 50_000
 solver.nn_params.verbose_update_frequency = 100
-solver.nn_params.batchsize = 512
-solver.nn_params.learning_rate = 1e-3
+solver.nn_params.batchsize = 1024 # 512
+solver.nn_params.learning_rate = 1e-4 # 1e-3
 solver.nn_params.λ_regularization = 1e-5
 
 solver.nn_params.use_dropout = true

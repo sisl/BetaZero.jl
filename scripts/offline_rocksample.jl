@@ -19,6 +19,7 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         ),
                         collect_metrics=true,
                         verbose=true,
+                        save_plots=true,
                         plot_incremental_data_gen=true,
                         accuracy_func=rocksample_accuracy_func)
 

@@ -116,28 +116,33 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
 end
 
 
+calc_loss_weight(nn_params::BetaZeroNetworkParameters) = calc_loss_weight(nn_params.action_size)
+calc_loss_weight(action_size::Int) = Float32(round(1 - 1/action_size; digits=2))
+
+
 """
 Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
 """
 function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing, ϵ_std::Float32=1f-10)
     nn_params = solver.nn_params
+    device = nn_params.device
     lr = nn_params.learning_rate
     λ = nn_params.λ_regularization
     loss_str = string(nn_params.loss_func)
     normalize_input = nn_params.normalize_input
     normalize_output = nn_params.normalize_output
     sample_more_than_collected = nn_params.sample_more_than_collected
-    classification_loss_weight = nn_params.classification_loss_weight
+    value_loss_weight = nn_params.value_loss_weight
     use_kl_loss = nn_params.use_kl_loss
     key = (lr, λ, loss_str, normalize_input, normalize_output)
 
     n_train = Int(nn_params.n_samples ÷ (1/nn_params.training_split))
     n_valid = nn_params.n_samples - n_train
 
-    data_train = sample_data(solver.data_buffer_train, n_train; sample_more_than_collected) # sample from last `n_buffer` simulations.
-    data_valid = sample_data(solver.data_buffer_valid, n_valid; sample_more_than_collected) # sample from last `n_buffer` simulations.
-    x_train, y_train = data_train.X, data_train.Y
-    x_valid, y_valid = data_valid.X, data_valid.Y
+    data_train_set = sample_data(solver.data_buffer_train, n_train; sample_more_than_collected) # sample from last `n_buffer` simulations.
+    data_valid_set = sample_data(solver.data_buffer_valid, n_valid; sample_more_than_collected) # sample from last `n_buffer` simulations.
+    x_train, y_train = data_train_set.X, data_train_set.Y
+    x_valid, y_valid = data_valid_set.X, data_valid_set.Y
 
     # Update training and validation set size (could be different based on available data to be sampled)
     n_train = size(y_train)[end]
@@ -165,13 +170,6 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     verbose && @info "Data set size: $(n_train):$(n_valid) (training:validation)"
 
-    # Put model/data onto GPU device
-    device = nn_params.device
-    x_train = device(x_train)
-    y_train = device(y_train)
-    x_valid = device(x_valid)
-    y_valid = device(y_valid)
-
     if n_train < nn_params.batchsize
         batchsize = n_train
         @warn("Number of observations less than batch-size, decreasing the batch-size to $batchsize", maxlog=1)
@@ -180,6 +178,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     end
 
     train_data = Flux.Data.DataLoader((x_train, y_train), batchsize=batchsize, shuffle=true)
+    valid_data = Flux.Data.DataLoader((x_valid, y_valid), batchsize=batchsize, shuffle=true)
 
     # Remove un-normalization layer (if added from previous iteration)
     # We want to train for values close to [-1, 1]
@@ -205,9 +204,10 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     penalty() = λ*sum(sqnorm, Flux.params(f))
     sign_accuracy(x, y) = mean(sign.(f(x)[1,:]) .== sign.(y[1,:]))
 
-    verbose && @info "Using classification weight of: $classification_loss_weight"
 
-    loss(x, y; w=classification_loss_weight, info=Dict()) = begin
+    verbose && @info "Using value weight of: $value_loss_weight"
+
+    loss(x, y; w=value_loss_weight, info=Dict()) = begin
         local ỹ = f(x)
         n = size(ỹ,1)-1
         vmask = Flux.CuArray(vcat(1, zeros(Int,n)))
@@ -265,9 +265,6 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid; extra="", digits=5) = string("Epoch: ", epoch, "\t Loss Train: ", round(loss_train; digits), " [", round(loss_train_value; digits), ", ", round(loss_train_policy; digits), "]\t Loss Val: ", round(loss_valid; digits), " [", round(loss_valid_value; digits), ", ", round(loss_valid_policy; digits), "]\t|\t Sign Acc. Train: ", rpad(round(acc_train; digits), digits+2, '0'), "\t Sign Acc. Val: ", rpad(round(acc_valid; digits), digits+2, '0'), extra)
 
-    # TODO: Parameterize
-    SAVE_DONT_DISPLAY = true
-
     function plot_training(e, training_epochs, losses_train, losses_train_value, losses_train_policy, losses_valid, losses_valid_value, losses_valid_policy, key)
         learning_curve = plot(xlims=(1, training_epochs), title="learning curve: $key")
         plot!(1:e, losses_train, label="training", c=1)
@@ -280,33 +277,54 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         return learning_curve
     end
 
-    # TODO: Parameterize
-    stop_short = true
-    stop_short_threshold = 1000 # TODO: Parameterize
+    # Batch calculate the loss, placing data on device
+    function calc_loss(data; w=value_loss_weight, info=Dict())
+        ℓ = 0
+        for (x, y) in data
+            local_info = Dict()
+            ℓ += loss(device(x), device(y); w, info=local_info)
+            merge!(+, info, local_info)
+        end
+        return ℓ
+    end
+
+    function calc_sign_accuracy(data)
+        matched = 0
+        total = 0
+        for (x, y) in data
+            x = device(x)
+            y = device(y)
+            v = f(x)[1,:]
+            g = y[1,:]
+            matched += sum(sign.(v) .== sign.(g))
+            total += length(v)
+        end
+        return matched/total
+    end
+
     has_stopped_short = false
     final_stopped_epoch = -Inf
 
     verbose && @info "Beginning training $(size(x_train))"
     @conditional_time verbose for e in 1:training_epochs
-        # opt.eta = learning_rate_schedule(e, training_epochs)
-        w = classification_loss_weight
+        w = value_loss_weight
         for (x, y) in train_data
-            # TODO: Only put batches on GPU
-            # x = device(x)
-            # y = device(y)
+            # Only put batches on device
+            x = device(x)
+            y = device(y)
             _, back = Flux.pullback(() -> loss(x, y; w), θ)
             Flux.update!(opt, θ, back(1.0f0))
         end
         loss_train_info = Dict()
-        loss_train = loss(x_train, y_train; w, info=loss_train_info)
+        loss_train = calc_loss(train_data; w, info=loss_train_info)
         loss_train_value = loss_train_info[:value_loss]
         loss_train_policy = loss_train_info[:policy_loss]
         loss_valid_info = Dict()
-        loss_valid = loss(x_valid, y_valid; w, info=loss_valid_info)
+        loss_valid = calc_loss(valid_data; w, info=loss_valid_info)
         loss_valid_value = loss_valid_info[:value_loss]
         loss_valid_policy = loss_valid_info[:policy_loss]
-        acc_train = sign_accuracy(x_train, y_train)
-        acc_valid = sign_accuracy(x_valid, y_valid)
+        acc_train = calc_sign_accuracy(train_data)
+        acc_valid = calc_sign_accuracy(valid_data)
         push!(losses_train, loss_train)
         push!(losses_train_value, loss_train_value)
         push!(losses_train_policy, loss_train_policy)
@@ -341,7 +359,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
             nn_params.display_plots && display(learning_curve)
         end
 
-        if stop_short && e - checkpoint_epoch > stop_short_threshold
+        if nn_params.stop_short && e - checkpoint_epoch > nn_params.stop_short_threshold
             @info "Stopping short at epoch $e"
             has_stopped_short = true
             final_stopped_epoch = e

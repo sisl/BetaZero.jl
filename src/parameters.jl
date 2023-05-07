@@ -34,7 +34,7 @@ Parameters for neural network surrogate model.
     training_split::Float64 = 0.8 # Training / validation split (Default: 80/20)
     sample_more_than_collected::Bool = true # Sample more data (with replacement) than is in the buffer
     batchsize::Int = 512 # Batch size
-    learning_rate::Float64 = 0.001 # Learning rate for ADAM optimizer during training
+    learning_rate::Float64 = 1e-3 # Learning rate for ADAM optimizer during training
     λ_regularization::Float64 = 1e-5 # Parameter for L2-norm regularization
     optimizer = Adam # Training optimizer (e.g., Adam, Descent, Nesterov)
     loss_func::Function = Flux.Losses.mse # MAE works well for problems with large returns around zero, and spread out otherwise.
@@ -54,7 +54,7 @@ Parameters for neural network surrogate model.
     next_action_return_argmax::Bool = false # Instead of sampling, return the argmax action during action widening
     use_epsilon_greedy::Bool = false # Use epsilon-greedy exploration during action widening
     ϵ_greedy::Float64 = 0.0 # Epsilon parameter to select random action during widening with probability ϵ_greedy
-    classification_loss_weight::Float32 = 0.5f0 # Weight applied to the classification (policy) component of the loss function
+    value_loss_weight::Float32 = 0.5f0 # Weight applied to the value component of the loss function
     use_kl_loss::Bool = false # Use KL-divergence as classification (policy) loss (for Gumbel solver)
     incremental_save::Bool = false # Incrementally save off policy every iteration (TODO: fix undefined reference error)
     policy_filename::String = "betazero_policy.bson" # Filename when incrementally saving off poliy
@@ -62,6 +62,8 @@ Parameters for neural network surrogate model.
     use_checkpoint::Bool = true # Save networks along the way to use based on minimum validation loss
     checkpoint_frequency::Int = 1 # How often do we evaluate and save a checkpoint?
     checkpoint_validation_loss::Bool = true # Checkpoint based on minimum validation loss (`false` = checkpointing on training loss)
+    stop_short::Bool = true # Cut the training off prematurely
+    stop_short_threshold::Int = 1000 # Cut training off if the validation loss has not improved for the set number of epochs
     verbose_update_frequency::Int = training_epochs # Frequency of printed training output
     verbose_plot_frequency::Number = Inf # Frequency of plotted training/validation output
     display_plots::Bool = false # Display training and validation plots after training

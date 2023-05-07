@@ -246,7 +246,7 @@ function best_sanode_Q_and_counts(tree::PUCTTree, snode::Int)
 
     best_QN = -Inf
     sanode = 0
-    QN = softmax(Q) .* N ./ sum(N) # no normalization necessary for max.
+    QN = softmax(Q) .* (N ./ sum(N)) # no normalization necessary for max.
     for (i,child) in enumerate(tree.children[snode])
         if QN[i] > best_QN
             best_QN = QN[i]

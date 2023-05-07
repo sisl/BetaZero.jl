@@ -45,6 +45,7 @@ export
     RawNetworkPolicy,
     RawValueNetworkPolicy,
     initialize_network,
+    calc_loss_weight,
     value_plot,
     policy_plot,
     value_and_policy_plot,
