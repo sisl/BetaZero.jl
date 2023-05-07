@@ -413,12 +413,15 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         f = Chain(f.layers[1:end-1]..., heads)
     end
 
-    value_model = normalize_input ? f(unnormalize_x(cpu(x_valid)))[1,:] : f(cpu(x_valid))[1,:]
-    value_data = normalize_output ? unnormalize_y(cpu(y_valid))[1,:] : cpu(y_valid)[1,:]
+    value_model = value_data = nothing
 
     if nn_params.verbose_plot_frequency != Inf
         value_distribution = nothing
         try
+            @warn("Data size may be too much to run it entirely through the network...")
+            value_model = normalize_input ? f(unnormalize_x(cpu(x_valid)))[1,:] : f(cpu(x_valid))[1,:]
+            value_data = normalize_output ? unnormalize_y(cpu(y_valid))[1,:] : cpu(y_valid)[1,:]
+
             value_distribution = Plots.histogram(value_model, alpha=0.5, label="model", c=:gray, title="values: $key")
             Plots.histogram!(value_data, alpha=0.5, label="data", c=:navy)
             nn_params.save_plots && Plots.savefig(nn_params.plot_value_distribution_filename)
