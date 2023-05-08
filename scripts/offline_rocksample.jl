@@ -48,5 +48,5 @@ solver.mcts_solver = PUCTSolver(n_iterations=200,
     counts_in_info=true)
 
 policy = solve(solver, pomdp)
-BetaZero.save_policy(policy, "data/policy_$filename_suffix")
-BetaZero.save_solver(solver, "data/solver_$filename_suffix")
+BetaZero.save_policy(policy, "policy_$filename_suffix")
+BetaZero.save_solver(solver, "solver_$filename_suffix")

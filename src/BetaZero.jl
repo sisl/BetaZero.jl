@@ -88,6 +88,7 @@ export
                                                 tree_in_info=false,
                                                 counts_in_info=true, # Note, required for policy vector.
                                                 show_progress=false,
+                                                final_criterion=MaxQN(),
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a surrogate lookup
     data_collection_policy::Policy = RandomPolicy(Random.GLOBAL_RNG, pomdp, updater) # Policy used for data collection (if indicated to use different policy than the BetaZero on-policy)
     use_data_collection_policy::Bool = false # Use provided policy for data collection.
@@ -350,7 +351,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     accuracy_func = solver.accuracy_func
     include_info = solver.include_info
     max_steps = solver.params.max_steps
-    use_q_weighted_counts = solver.params.use_q_weighted_counts
+    final_criterion = solver.mcts_solver.final_criterion
     use_completed_policy_gumbel = solver.params.use_completed_policy_gumbel
     skip_missing_reward_signal = solver.params.skip_missing_reward_signal
     train_missing_on_predicted = solver.params.train_missing_on_predicted
@@ -370,7 +371,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         ds0 = initialstate_distribution(pomdp)
         s0 = rand(ds0) # IMPORTANT: Do this before `initialize_belief` (if ds0 is a discrete set of particles, you'll want to pull out the true state from the particle set first).
         b0 = initialize_belief(up, ds0)
-        data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, use_q_weighted_counts, use_completed_policy_gumbel)
+        data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel)
         if ismissing(data) && ismissing(metrics)
             # ignore missing data
             B = Z = Π = metrics = discounted_return = missing
@@ -490,7 +491,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                         accuracy_func::Function=(args...)->nothing,
                         include_info::Bool=false,
                         show_time::Bool=false,
-                        use_q_weighted_counts::Bool=true,
+                        final_criterion::Any=MaxQN(),
                         use_completed_policy_gumbel::Bool=false,
                         skip_missing_reward_signal::Bool=false,
                         train_missing_on_predicted::Bool=false)
@@ -551,10 +552,14 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             if use_completed_policy_gumbel
                 P = completed_policy # Completed policy for guarenteed improvement (see Danihelka et al. 2022)
             else
-                if use_q_weighted_counts
+                if final_criterion isa MaxQN
                     tree_P = normalize(softmax(root_values) .* root_counts, 1) # Q-weighted normalized counts
-                else
+                elseif final_criterion isa MaxN
                     tree_P = normalize(root_counts, 1) # Only use N(b,a) counts.
+                elseif final_criterion isa MaxQ
+                    tree_P = softmax(root_values) # Q-values
+                else
+                    error("No policy data collection for the 'final_criterion' type of $(final_criterion)")
                 end
 
                 # Fill out entire policy vector for every action (if it wasn't seen in the tree, then p = ϵ for numerical stability)

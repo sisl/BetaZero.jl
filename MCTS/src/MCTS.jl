@@ -43,7 +43,10 @@ export
     n_children,
     isroot,
     default_action,
-    get_state_node
+    get_state_node,
+    MaxQ,
+    MaxN,
+    MaxQN
 
 export
     AbstractStateNode,
@@ -67,6 +70,7 @@ include("gumbel_types.jl")
 include("gumbel.jl")
 include("dar_types.jl")
 include("dar.jl")
+include("criteria.jl")
 include("puct_types.jl")
 include("puct.jl")
 include("action_gen.jl")

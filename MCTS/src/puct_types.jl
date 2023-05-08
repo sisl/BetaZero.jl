@@ -131,6 +131,7 @@ mutable struct PUCTSolver <: AbstractMCTSSolver
     reset_callback::Function
     show_progress::Bool
     timer::Function
+    final_criterion::Any
 end
 
 """
@@ -163,7 +164,8 @@ function PUCTSolver(;
                     default_action::Any=ExceptionRethrow(),
                     reset_callback::Function=(mdp, s) -> false,
                     show_progress::Bool=false,
-                    timer=() -> 1e-9 * time_ns())
+                    timer=() -> 1e-9 * time_ns(),
+                    final_criterion=MaxQN())
     PUCTSolver(
             depth,
             exploration_constant,
@@ -190,6 +192,7 @@ function PUCTSolver(;
             reset_callback,
             show_progress,
             timer,
+            final_criterion,
     )
 end
 

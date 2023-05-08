@@ -69,7 +69,7 @@ function POMDPTools.action_info(p::PUCTPlanner, s; tree_in_info=false, counts_in
             info[:counts] = Dict(map(i->Pair(root_actions[i], (root_counts[i], root_values[i])), eachindex(root_actions)))
         end
 
-        sanode = best_sanode_Q_and_counts(tree, snode)
+        sanode = select_best(p.solver.final_criterion, tree, snode)
         a = tree.a_labels[sanode] # choose action with highest approximate value
     catch ex
         a = convert(actiontype(p.mdp), default_action(p.solver.default_action, p.mdp, s, ex))
@@ -209,52 +209,6 @@ function add_state!(sol::PUCTSolver, tree, sanode, sp, r)
     return new_node, spnode
 end
 
-
-"""
-Return the best action.
-
-Some publications say to choose action that has been visited the most
-e.g., Continuous Upper Confidence Trees by Couëtoux et al.
-"""
-function best_sanode_Q(tree::PUCTTree, snode::Int)
-    best_Q = -Inf
-    sanode = 0
-    for child in tree.children[snode]
-        if tree.q[child] > best_Q
-            best_Q = tree.q[child]
-            sanode = child
-        end
-    end
-    return sanode
-end
-
-
-"""
-Return the best action using information from counts and Q-values.
-
-Some publications say to choose action that has been visited the most
-e.g., Continuous Upper Confidence Trees by Couëtoux et al.
-"""
-function best_sanode_Q_and_counts(tree::PUCTTree, snode::Int)
-    m = length(tree.children[snode])
-    Q = Vector{Float64}(undef, m)
-    N = Vector{Float64}(undef, m)
-    for (i,child) in enumerate(tree.children[snode])
-        Q[i] = tree.q[child]
-        N[i] = tree.n[child]
-    end
-
-    best_QN = -Inf
-    sanode = 0
-    QN = softmax(Q) .* (N ./ sum(N)) # no normalization necessary for max.
-    for (i,child) in enumerate(tree.children[snode])
-        if QN[i] > best_QN
-            best_QN = QN[i]
-            sanode = child
-        end
-    end
-    return sanode
-end
 
 
 normalize_q(q, Q) = normalize01(q, Q)

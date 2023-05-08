@@ -10,7 +10,6 @@ Parameters for the BetaZero algorithm.
     max_steps::Int = 100 # Maximum number of steps for each simulation.
     λ_ucb::Real = 0.0 # Upper confidence bound parameter for network evaluation/comparison: μ + λσ
     use_nn::Bool = true # Use neural network as the surrogate model
-    use_q_weighted_counts::Bool = true # When collecting the policy data, weight the visit count distribution by the Q-values
     use_completed_policy_gumbel::Bool = false # When using the Gumbel solver, use the completed policy estimate as the policy data
     use_raw_policy_network::Bool = false # Generate data only from the raw policy network
     use_raw_value_network::Bool = false # Generate data only from the raw value network (given a `n_obs` below)
@@ -50,6 +49,7 @@ Parameters for neural network surrogate model.
     use_dirichlet_exploration::Bool = false # Apply Dirichlet noise to policy vector for exploration
     α_dirichlet::Float64 = 0.03 # Alpha parameter of the Dirichlet action noise distribution
     ϵ_dirichlet::Float64 = 0.25 # Weighting parameter for applying Dirichlet action noise
+    use_prioritized_action_selection::Bool = true # When performing action branching, select new actions from the policy network
     zero_out_tried_actions::Bool = false # When selecting a next action to widen on, zero out the probabilities for already tried actions.
     next_action_return_argmax::Bool = false # Instead of sampling, return the argmax action during action widening
     use_epsilon_greedy::Bool = false # Use epsilon-greedy exploration during action widening

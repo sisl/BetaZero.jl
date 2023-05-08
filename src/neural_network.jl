@@ -511,58 +511,64 @@ end
 Use predicted policy vector to sample next action.
 """
 function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,EnsembleNetwork}, nn_params::BetaZeroNetworkParameters, bnode)
-    p = policy_lookup(f, belief)
-    A = POMDPs.actions(problem)
     Ab = POMDPs.actions(problem, belief)
 
-    # Match indices of (potentially) reduced belief-dependent action space to get correctly associated probabilities from the network
-    if length(A) != length(Ab)
-        idx = Vector{Int}(undef, length(Ab))
-        for (i,a) in enumerate(A)
-            for (j,ab) in enumerate(Ab)
-                if a == ab
-                    idx[j] = i
-                    break
-                end
-            end
-        end
-        p = p[idx]
-    end
+    if nn_params.use_prioritized_action_selection
+        p = policy_lookup(f, belief)
+        A = POMDPs.actions(problem)
 
-    if nn_params.use_dirichlet_exploration
-        α = nn_params.α_dirichlet
-        ϵ = nn_params.ϵ_dirichlet
-        k = length(p)
-        η = rand(Dirichlet(k, α))
-        p = (1 - ϵ)*p + ϵ*η
-    end
-
-    # Zero-out already tried actions
-    if nn_params.zero_out_tried_actions
-        action_indices = bnode.tree.children[bnode.index]
-        tried_actions = bnode.tree.a_labels[action_indices]
-        if !isempty(tried_actions) && length(tried_actions) != length(Ab)
-            for (i,a) in enumerate(tried_actions)
+        # Match indices of (potentially) reduced belief-dependent action space to get correctly associated probabilities from the network
+        if length(A) != length(Ab)
+            idx = Vector{Int}(undef, length(Ab))
+            for (i,a) in enumerate(A)
                 for (j,ab) in enumerate(Ab)
                     if a == ab
-                        p[j] = 1e-6 # zero-out
+                        idx[j] = i
                         break
                     end
                 end
             end
+            p = p[idx]
         end
-    end
 
-    p = normalize(p, 1) # re-normalize to sum to 1
+        if nn_params.use_dirichlet_exploration
+            α = nn_params.α_dirichlet
+            ϵ = nn_params.ϵ_dirichlet
+            k = length(p)
+            η = rand(Dirichlet(k, α))
+            p = (1 - ϵ)*p + ϵ*η
+        end
 
-    if nn_params.use_epsilon_greedy && rand() < nn_params.ϵ_greedy
-        return rand(Ab)
-    else
-        if nn_params.next_action_return_argmax
-            return Ab[argmax(p)]
+        # Zero-out already tried actions
+        if nn_params.zero_out_tried_actions
+            action_indices = bnode.tree.children[bnode.index]
+            tried_actions = bnode.tree.a_labels[action_indices]
+            if !isempty(tried_actions) && length(tried_actions) != length(Ab)
+                for (i,a) in enumerate(tried_actions)
+                    for (j,ab) in enumerate(Ab)
+                        if a == ab
+                            p[j] = 1e-6 # zero-out
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        p = normalize(p, 1) # re-normalize to sum to 1
+
+        if nn_params.use_epsilon_greedy && rand() < nn_params.ϵ_greedy
+            return rand(Ab)
         else
-            return rand(SparseCat(Ab, p))
+            if nn_params.next_action_return_argmax
+                return Ab[argmax(p)]
+            else
+                return rand(SparseCat(Ab, p))
+            end
         end
+    else
+        # Sample randomly from the action space
+        return rand(Ab)
     end
 end
 
