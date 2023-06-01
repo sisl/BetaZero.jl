@@ -28,7 +28,7 @@ function compute_optimal_return_minex(pomdp::MinExPOMDP; kwargs...)
     if ds0 isa Vector
         # discrete (cached) particle set (Note, avoid using this)
         @warn "Computing using discrete, generated particle set"
-        ore_matrix = load_states(joinpath(@__DIR__, "..", "models", "MinEx", "src", "generated_states.h5"))
+        ore_matrix = load_states(joinpath(@__DIR__, "..", "submodules", "MinEx", "src", "generated_states.h5"))
         ds0 = [MinExState(ore_matrix[:,:,i]) for i in axes(ore_matrix,3)]
     end
     return compute_optimal_return_minex(pomdp, ds0; kwargs...)

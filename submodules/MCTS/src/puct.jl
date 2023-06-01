@@ -119,6 +119,10 @@ function simulate(dpw::PUCTPlanner, snode::Int, d::Int)
     tree.total_n[snode] += 1
     tree.q[sanode] += (q - tree.q[sanode])/tree.n[sanode]
 
+    # max-Q backups
+    # maxq_node = select_best(MaxQ(), tree, snode)
+    # return tree.q[maxq_node]
+
     return q
 end
 
@@ -156,6 +160,7 @@ State progressive widening.
 function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
     new_node = false
     if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
+    # if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state) || tree.n_a_children[sanode] == 0 #! Note.
         sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
 
         if sol.check_repeat_state && haskey(tree.s_lookup, sp)

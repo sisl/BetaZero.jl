@@ -75,7 +75,15 @@ POMDPs.discount(m::MinExPOMDP) = m.γ
 POMDPs.isterminal(m::MinExPOMDP, s) = any(loc->loc == TERMINAL_LOCATION, s.drill_locations)
 undrilled_locations(m::MinExPOMDP, b) = undrilled_locations(m::MinExPOMDP, rand(b))
 undrilled_locations(m::MinExPOMDP, s::MinExState) = setdiff(m.drill_locations, s.drill_locations)
-POMDPs.actions(m::MinExPOMDP, s_or_b) = [m.terminal_actions..., undrilled_locations(m, s_or_b)...]
+function POMDPs.actions(m::MinExPOMDP, s_or_b)
+    undrilled = undrilled_locations(m, s_or_b)
+    if length(m.drill_locations) - length(undrilled) ≥ 10 # TODO: Minimum number of drills.
+        return [m.terminal_actions..., undrilled...]
+    else
+        return undrilled
+    end
+    # return [m.terminal_actions..., undrilled_locations(m, s_or_b)...]
+end
 POMDPs.actions(m::MinExPOMDP) = [m.terminal_actions..., m.drill_locations...]
 
 Base.rand(b::ParticleCollection, n_particles::Int) = [rand(b) for _ in 1:n_particles] # Helper function for sampling multiple states from the posterior
