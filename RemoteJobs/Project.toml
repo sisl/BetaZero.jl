@@ -1,6 +1,5 @@
 name = "RemoteJobs"
 uuid = "3bc6ca60-8b85-4286-b881-d4609ff8527d"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

@@ -1,6 +1,5 @@
 name = "ParticleBeliefs"
 uuid = "aa14124c-3bd6-4f21-947b-abce5ea6e230"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

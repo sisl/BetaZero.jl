@@ -8,6 +8,6 @@ function BetaZero.MCTS.node_tag(b)
     return "belief [$(hash(b))]"
 end
 
-function BetaZero.MCTS.node_tag(a::Union{Tuple,Symbol})
+function BetaZero.MCTS.node_tag(a::Union{Tuple,Symbol,Int})
     return "$a"
 end

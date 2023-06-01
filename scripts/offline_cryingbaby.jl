@@ -1,6 +1,4 @@
-global RUN_PARALLEL = false
-
-RUN_PARALLEL && Sys.islinux() && include("launch_remote.jl")
+Sys.islinux() && !haskey(ENV, "LAUNCH_PARALLEL") && include("launch_remote.jl")
 using Revise
 using Distributed
 

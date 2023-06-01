@@ -123,7 +123,7 @@ calc_loss_weight(action_size::Int) = Float32(round(1 - 1/action_size; digits=2))
 """
 Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
 """
-function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing, ϵ_std::Float32=1f-10)
+function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing, ϵ_std::Float32=1f-10, rstats::RunningStats=RunningStats(), use_running_stats::Bool=true)
     nn_params = solver.nn_params
     device = nn_params.device
     lr = nn_params.learning_rate
@@ -162,8 +162,14 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     # Normalize target values close to the range of [-1, 1]
     if normalize_output
         # Normalize only based on the training data (but apply it to training and validation data)
-        mean_y = mean(y_train[1,:])
-        std_y = std(y_train[1,:])
+        if use_running_stats
+            # Keep track of all y-data to get better mean/std across entire sets of training data (running mean/std)
+            map(y->push!(rstats, y), y_train[1,:])
+            mean_y = mean(rstats)
+            std_y = std(rstats)
+        else
+            mean_y, std_y = mean_and_std(y_train[1,:])
+        end
         y_train[1,:] = normalize_func(y_train[1,:], mean_y, std_y)
         y_valid[1,:] = normalize_func(y_valid[1,:], mean_y, std_y)
     end
@@ -280,12 +286,17 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     # Batch calculate the loss, placing data on device
     function calc_loss(data; w=value_loss_weight, info=Dict())
         ℓ = 0
+        total = 0
         for (x, y) in data
             local_info = Dict()
             ℓ += loss(device(x), device(y); w, info=local_info)
             merge!(+, info, local_info)
+            total += size(y, 2)
         end
-        return ℓ
+        for k in keys(info)
+            info[k] = info[k]/total
+        end
+        return ℓ/total
     end
 
     function calc_sign_accuracy(data)
@@ -478,17 +489,32 @@ end
 
 
 """
+Get belief representation for network input, add batch dimension for Flux.
+"""
+function network_input(belief)
+    b = Float32.(input_representation(belief))
+    return Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
+end
+
+
+"""
+Evaluate the neural network `f` using the `belief` as input, return both the predicted value and policy vector.
+Note, inference is done on the CPU given a single input.
+"""
+network_lookup(policy::BetaZeroPolicy, belief) = network_lookup(policy.surrogate, belief)
+function network_lookup(f::Union{Chain,EnsembleNetwork}, belief)
+    x = network_input(belief)
+    y = cpu(f(x)) # evaluate network `f`
+    return y[1], y[2:end] # [v, p...]
+end
+
+
+"""
 Evaluate the neural network `f` using the `belief` as input, return the predicted value.
 Note, inference is done on the CPU given a single input.
 """
 value_lookup(policy::BetaZeroPolicy, belief) = value_lookup(policy.surrogate, belief)
-function value_lookup(f::Union{Chain,EnsembleNetwork}, belief)
-    b = Float32.(input_representation(belief))
-    x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
-    y = f(x) # evaluate network `f`
-    value = cpu(y)
-    return value[1]
-end
+value_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[1] # (v, p)
 POMDPs.value(policy::BetaZeroPolicy, belief) = value_lookup(policy, belief)
 POMDPs.value(f::Union{Chain,EnsembleNetwork}, belief) = value_lookup(f, belief)
 
@@ -498,13 +524,7 @@ Evaluate the neural network `f` using the `belief` as input, return the predicte
 Note, inference is done on the CPU given a single input.
 """
 policy_lookup(policy::BetaZeroPolicy, belief) = policy_lookup(policy.surrogate, belief)
-function policy_lookup(f::Union{Chain,EnsembleNetwork}, belief)
-    b = Float32.(input_representation(belief))
-    x = Flux.unsqueeze(b; dims=ndims(b)+1) # add extra single dimension (batch)
-    y = f(x) # evaluate network `f`
-    policy = cpu(y)
-    return policy[2:end]
-end
+policy_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[2] # (v, p)
 
 
 """
@@ -529,14 +549,6 @@ function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,En
                 end
             end
             p = p[idx]
-        end
-
-        if nn_params.use_dirichlet_exploration
-            α = nn_params.α_dirichlet
-            ϵ = nn_params.ϵ_dirichlet
-            k = length(p)
-            η = rand(Dirichlet(k, α))
-            p = (1 - ϵ)*p + ϵ*η
         end
 
         # Zero-out already tried actions

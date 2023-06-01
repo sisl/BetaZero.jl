@@ -1,6 +1,5 @@
 name = "CryingBaby"
 uuid = "70d07a6e-8df7-4eb2-a05c-d64cb2247425"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

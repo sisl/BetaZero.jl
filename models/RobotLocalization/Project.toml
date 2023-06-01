@@ -1,6 +1,5 @@
 name = "RobotLocalization"
 uuid = "f2566530-00e9-4976-b5ca-096c4b3606d1"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

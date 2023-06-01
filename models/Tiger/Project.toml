@@ -1,6 +1,5 @@
 name = "Tiger"
 uuid = "fe9e6e58-05e2-4a63-87b2-a91c8a4bccc3"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

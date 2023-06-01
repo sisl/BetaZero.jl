@@ -33,6 +33,7 @@ include("optimal_return.jl")
 include("onestep_lookahead.jl")
 include("bias.jl")
 include("parameters.jl")
+include("running_stats.jl")
 
 export
     BetaZeroSolver,
@@ -54,7 +55,9 @@ export
     plot_accuracy,
     plot_returns,
     plot_accuracy_and_returns,
+    plot_online_performance,
     plot_data_gen,
+    plot_ablations,
     bettersavefig,
     save_policy,
     save_solver,
@@ -64,7 +67,13 @@ export
     load_surrogate,
     load_incremental,
     mean_and_stderr,
-    solve_planner!
+    solve_planner!,
+    network_input,
+    network_lookup,
+    value_lookup,
+    policy_lookup,
+    dirichlet_noise,
+    bootstrap
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
@@ -129,7 +138,7 @@ mutable struct BetaZeroPolicy <: POMDPs.Policy
 end
 
 
-include("neural_network.jl") # Needs BetaZeroPolicy
+include("neural_network.jl") # Needs BetaZeroPolicy and RunningStats
 include("raw_network.jl") # Needs Surrogate defined.
 include("saving.jl") # Needs BetaZeroSolver and BetaZeroPolicy defined.
 include("plots.jl")
@@ -141,6 +150,7 @@ The main BetaZero policy iteration algorithm.
 function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate=solver.params.use_nn ? initialize_network(solver) : initialize_gaussian_process(solver), resume::Bool=false)
     local current_surrogate = surrogate
     local best_surrogate = surrogate
+    rstats = RunningStats()
     check_data_buffer_size!(solver)
     fill_bmdp!(solver)
 
@@ -168,15 +178,12 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate
 
         # x) Optimize surrogate with recent simulated data.
         if i != solver.params.n_iterations
-            current_surrogate = train(deepcopy(best_surrogate), solver; verbose=solver.verbose)
+            current_surrogate = train(deepcopy(best_surrogate), solver; rstats, verbose=solver.verbose)
         end
 
         # Save off incremental policy
         incremental_save(solver, best_surrogate, i)
     end
-
-    # Re-run holdout test with final surrogate
-    run_holdout_test!(pomdp, solver, best_surrogate)
 
     # Include the surrogate in the MCTS planner as part of the BetaZero policy
     return solve_planner!(solver, best_surrogate)
@@ -195,9 +202,25 @@ end
 """
 Return the BetaZero planner, first adding the value estimator and then solving the inner MCTS planner.
 """
+function solve_planner!(policy::BetaZeroPolicy, f::Surrogate=policy.surrogate)
+    attach_surrogate!(policy.planner.solver, policy.parameters.nn_params, f)
+    bmdp = policy.planner.mdp
+    policy.planner.solver.reset_callback = (mdp, s)->false
+    policy.planner.solver.timer = ()->1e-9 * time_ns()
+    if policy.planner.solver.init_Q isa Function
+        policy.planner.solver.init_Q = bootstrap(f) # re-apply bootstrap
+    end
+    mcts_planner = solve(policy.planner.solver, bmdp)
+    policy.surrogate = f
+    policy.planner = mcts_planner
+    return policy
+end
+
 function solve_planner!(solver::BetaZeroSolver, f::Surrogate)
     attach_surrogate!(solver, f)
     fill_bmdp!(solver)
+    solver.mcts_solver.reset_callback = (mdp, s)->false
+    solver.mcts_solver.timer = ()->1e-9 * time_ns()
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     parameters = ParameterCollection(solver.params, solver.nn_params, solver.gp_params)
     return BetaZeroPolicy(f, mcts_planner, parameters)
@@ -207,23 +230,24 @@ end
 """
 Attach the surrogate model to the MCTS solver for value estimates and next action selection.
 """
-function attach_surrogate!(solver::BetaZeroSolver, f::Surrogate)
-    if solver.mcts_solver isa GumbelSolver
-        solver.mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
-        solver.mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
-    elseif solver.mcts_solver isa DARSolver
-        solver.mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
-        solver.mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
-        solver.mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, solver.nn_params, bnode)
-    elseif solver.mcts_solver isa PUCTSolver
-        solver.mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
-        solver.mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
-        solver.mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, solver.nn_params, bnode)
+attach_surrogate!(solver::BetaZeroSolver, f::Surrogate) = attach_surrogate!(solver.mcts_solver, solver.nn_params, f)
+function attach_surrogate!(mcts_solver, nn_params::BetaZeroNetworkParameters, f::Surrogate)
+    if mcts_solver isa GumbelSolver
+        mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
+        mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
+    elseif mcts_solver isa DARSolver
+        mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
+        mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
+        mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
+    elseif mcts_solver isa PUCTSolver
+        mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
+        mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
+        mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
     else
-        solver.mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(f, b)
-        solver.mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, solver.nn_params, bnode)
+        mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(f, b)
+        mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
     end
-    return solver
+    return nothing
 end
 
 
@@ -322,11 +346,13 @@ Generate training data using online MCTS with the best surrogate so far `f` (par
 function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
                         outer_iter::Int=0, inner_iter::Int=solver.params.n_data_gen,
                         return_metrics::Bool=true,
-                        use_different_policy::Bool=false)
+                        use_different_policy::Bool=false,
+                        holdout_criteria::Bool=false)
     # Confirm that surrogate is on the CPU for inference
     f = cpu(f)
     up = solver.updater
     fill_bmdp!(solver)
+    bmdp = solver.bmdp
 
     if use_different_policy
         @info "Using provided policy for data generation..."
@@ -337,13 +363,29 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
             planner = RawNetworkPolicy(pomdp, f)
         elseif solver.params.use_raw_value_network
             @info "Using raw [value] network for data generation..."
-            planner = RawValueNetworkPolicy(solver.bmdp, f)
+            planner = RawValueNetworkPolicy(bmdp, f)
             planner.n_obs = solver.params.raw_value_network_n_obs
             @info "Number of onestep value observations = $(planner.n_obs)"
         else
             # Run MCTS to generate data using the surrogate `f`
             attach_surrogate!(solver, f)
-            planner = solve(solver.mcts_solver, solver.bmdp)
+
+            if holdout_criteria
+                if hasproperty(solver.mcts_solver, :final_criterion) && hasproperty(solver.mcts_solver.final_criterion, :τ)
+                    @info "Changing holdout final criteria to return maximizing action."
+                    mcts_solver_holdout = deepcopy(solver.mcts_solver)
+                    crit = mcts_solver_holdout.final_criterion
+                    mcts_solver_holdout.final_criterion = typeof(crit)(NamedTuple(p=>p == :τ ? 0 : getproperty(crit, p) for p in propertynames(crit))...) # return maximizing action (bypass immutable structs)
+                    mcts_solver = mcts_solver_holdout
+                else
+                    @info "Running holdout with for solver $(typeof(solver.mcts_solver))"
+                    mcts_solver = solver.mcts_solver
+                end
+            else
+                mcts_solver = solver.mcts_solver
+            end
+
+            planner = solve(mcts_solver, bmdp)
         end
     end
 
@@ -351,10 +393,11 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     accuracy_func = solver.accuracy_func
     include_info = solver.include_info
     max_steps = solver.params.max_steps
-    final_criterion = solver.mcts_solver.final_criterion
+    final_criterion = mcts_solver.final_criterion
     use_completed_policy_gumbel = solver.params.use_completed_policy_gumbel
     skip_missing_reward_signal = solver.params.skip_missing_reward_signal
     train_missing_on_predicted = solver.params.train_missing_on_predicted
+    nn_params = solver.nn_params
 
     solver.verbose && @info "Number of processes: $(nprocs())"
     progress = Progress(inner_iter)
@@ -369,9 +412,9 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         Random.seed!(seed)
         # @info "Generating data ($i/$(inner_iter)) with seed ($seed)"
         ds0 = initialstate_distribution(pomdp)
-        s0 = rand(ds0) # IMPORTANT: Do this before `initialize_belief` (if ds0 is a discrete set of particles, you'll want to pull out the true state from the particle set first).
+        s0 = rand(ds0)
         b0 = initialize_belief(up, ds0)
-        data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel)
+        data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel, nn_params)
         if ismissing(data) && ismissing(metrics)
             # ignore missing data
             B = Z = Π = metrics = discounted_return = missing
@@ -486,7 +529,7 @@ Run single simulation using a belief-MCTS policy on the original POMDP (i.e., no
 """
 function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater, b0=initialize_belief(up, initialstate(pomdp)), s0=rand(b0);
                         max_steps=100,
-                        ϵ=1e-10, # for policy vector
+                        ϵ=1e-8, # for policy vector
                         collect_metrics::Bool=false,
                         accuracy_func::Function=(args...)->nothing,
                         include_info::Bool=false,
@@ -494,7 +537,8 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                         final_criterion::Any=MaxQN(),
                         use_completed_policy_gumbel::Bool=false,
                         skip_missing_reward_signal::Bool=false,
-                        train_missing_on_predicted::Bool=false)
+                        train_missing_on_predicted::Bool=false,
+                        nn_params::Union{Nothing,BetaZeroNetworkParameters}=nothing)
     data = [BetaZeroTrainingData(b=input_representation(b0))]
     rewards::Vector{Float64} = [0.0]
     γ = POMDPs.discount(pomdp)
@@ -553,11 +597,35 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                 P = completed_policy # Completed policy for guarenteed improvement (see Danihelka et al. 2022)
             else
                 if final_criterion isa MaxQN
-                    tree_P = normalize(softmax(root_values) .* root_counts, 1) # Q-weighted normalized counts
+                    tree_P = normalize(softmax(root_values) .* root_counts, 1) # Q-weighted normalized counts (QWC)
                 elseif final_criterion isa MaxN
                     tree_P = normalize(root_counts, 1) # Only use N(b,a) counts.
                 elseif final_criterion isa MaxQ
                     tree_P = softmax(root_values) # Q-values
+                elseif final_criterion isa SampleQN
+                    τ = final_criterion.τ
+                    QN = (softmax(root_values) .* root_counts) .^ (1/τ)
+                    tree_P = normalize(QN, 1) # Exponentiated Q-weighted normalized counts (EQWC)
+                elseif final_criterion isa MaxZQN
+                    zq = final_criterion.zq
+                    zn = final_criterion.zn
+                    QN = (softmax(root_values).^zq .* root_counts.^zn)
+                    tree_P = normalize(QN, 1)
+                elseif final_criterion isa SampleZQN
+                    τ = final_criterion.τ
+                    zq = final_criterion.zq
+                    zn = final_criterion.zn
+                    QN = (softmax(root_values).^zq .* root_counts.^zn) .^ (1/τ)
+                    tree_P = normalize(QN, 1)
+                elseif final_criterion isa MaxWeightedQN
+                    w = final_criterion.w
+                    QN = (w*softmax(root_values) .+ (1-w)*root_counts)
+                    tree_P = normalize(QN, 1) # TODO: Unnecessary, already normalized.
+                elseif final_criterion isa SampleWeightedQN
+                    τ = final_criterion.τ
+                    w = final_criterion.w
+                    QN = (w*softmax(root_values) .+ (1-w)*root_counts) .^ (1/τ)
+                    tree_P = normalize(QN, 1) # Exponentiated Q-weighted normalized counts (EQWC)
                 else
                     error("No policy data collection for the 'final_criterion' type of $(final_criterion)")
                 end
@@ -569,6 +637,16 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                         P[i] = tree_P[j]
                     end
                 end
+            end
+        end
+
+        if !isnothing(nn_params)
+            if nn_params.use_dirichlet_exploration
+                α = nn_params.α_dirichlet
+                ϵ = nn_params.ϵ_dirichlet
+                k = length(P)
+                η = rand(Dirichlet(k, α))
+                P = (1 - ϵ)*P + ϵ*η
             end
         end
 
@@ -636,7 +714,7 @@ Run a test on a holdout set to collect performance metrics during BetaZero polic
 function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate; outer_iter::Int=0)
     if solver.params.n_holdout > 0
         solver.verbose && @info "Running holdout test..."
-        data, metrics = generate_data(pomdp, solver, f; inner_iter=solver.params.n_holdout, outer_iter=outer_iter)
+        data, metrics = generate_data(pomdp, solver, f; inner_iter=solver.params.n_holdout, outer_iter=outer_iter, holdout_criteria=true)
         returns = data.G
         accuracies = [m.accuracy for m in metrics]
         num_actions = [m.num_actions for m in metrics]

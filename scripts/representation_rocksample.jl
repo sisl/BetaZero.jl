@@ -2,39 +2,36 @@ using BetaZero
 using RockSample
 using ParticleFilters
 using Statistics
+using LinearAlgebra
+using POMDPTools
 using StatsBase
 using POMDPs
+using Plots; default(fontfamily="Computer Modern", framestyle=:box)
+Random.seed!(0xC0FFEE)
 
-pomdp = RockSamplePOMDP()
-up = BootstrapFilter(pomdp, 500)
+USE_ROCKSAMPLE_15 = true
 
-function BetaZero.input_representation(b::ParticleCollection{RSState{3}}; use_higher_orders::Bool=false, include_action::Bool=false, include_obs::Bool=false)
-    pos = [s.pos for s in ParticleFilters.particles(b)]
+if USE_ROCKSAMPLE_15
+    n = 15
+    k = 15
+else
+    n = 20
+    k = 20
+    @warn "RockSample(20): n × n of $n × $n and $k rocks..."
+end
+
+pomdp = RockSamplePOMDP((n,n), k)
+up = BootstrapFilter(pomdp, 1000)
+
+zeroifnan(x) = isnan(x) ? 0 : x
+
+function BetaZero.input_representation(b::ParticleCollection{RSState{15}}; use_higher_orders::Bool=false, include_action::Bool=false, include_obs::Bool=false)
+    pos = ParticleFilters.particles(b)[1].pos # always the same.
     rocks = [s.rocks for s in ParticleFilters.particles(b)]
-    μ_pos = mean(pos)
-    σ_pos = std(pos)
     μ_rocks = mean(rocks)
-    σ_rocks = std(rocks)
+    σ_rocks = map(zeroifnan, std(rocks))
 
-    return Float32[μ_pos..., μ_rocks..., σ_pos..., σ_rocks...]
-    # local b̃
-    # if use_higher_orders
-    #     zeroifnan(x) = isnan(x) ? 0 : x
-    #     s = zeroifnan(skewness(Y))
-    #     k = zeroifnan(kurtosis(Y))
-    #     b̃ = Float32[μ, σ, s, k]
-    # else
-    #     b̃ = Float32[μ_pos, σ]
-    # end
-    # if include_obs
-    #     o = isempty(b.observations) ? 0.f0 : b.observations[end]
-    #     b̃ = [b̃..., o]
-    # end
-    # if include_action
-    #     a = isempty(b.actions) ? -999 : b.actions[end]
-    #     b̃ = [b̃..., a]
-    # end
-    # return b̃
+    return Float32[pos..., μ_rocks..., σ_rocks...]
 end
 
 function rocksample_accuracy_func(pomdp, b0, s0, states, actions, returns)
@@ -56,11 +53,3 @@ function rocksample_accuracy_func(pomdp, b0, s0, states, actions, returns)
 end
 
 rocksample_belief_reward(pomdp, b, a, bp) = mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))
-
-POMDPs.convert_s(::Type{A}, b::ParticleCollection{RSState{3}}, m::BetaZero.BeliefMDP) where A<:AbstractArray = eltype(A)[BetaZero.input_representation(b)...]
-POMDPs.convert_s(::Type{ParticleCollection{RSState{3}}}, b::A, m::BetaZero.BeliefMDP) where A<:AbstractArray = ParticleCollection(particles=ParticleCollection(rand(LDNormalStateDist(b[1], b[2]), 500))) # TODO...
-
-
-# function Statistics.mean(b::ParticleCollection{RSState{3}})
-#     return RSState(mean(s->s.status, particles(b)), mean(s->s.y, particles(b)))
-# end

@@ -28,8 +28,8 @@ function load_policy(filename::String)
 
     if normalize_input
         infunc = network.layers[1]
-        mean_x = infunc.mean_x.contents
-        std_x = infunc.std_x.contents
+        mean_x = hasproperty(infunc.mean_x, :contents) ? infunc.mean_x.contents : infunc.mean_x
+        std_x = hasproperty(infunc.std_x, :contents) ? infunc.std_x.contents : infunc.std_x
         ϵ_std = infunc.ϵ_std
         normalize_x = x -> (x .- mean_x) ./ (std_x .+ ϵ_std)
         heads = network.layers[end]
@@ -37,8 +37,8 @@ function load_policy(filename::String)
 
     if normalize_output
         vhf = network.layers[end].layers.value_head.layers[end]
-        mean_y = vhf.mean_y.contents
-        std_y = vhf.std_y.contents
+        mean_y = hasproperty(vhf.mean_y, :contents) ? vhf.mean_y.contents : vhf.mean_y
+        std_y = hasproperty(vhf.std_y, :contents) ? vhf.std_y.contents : vhf.std_y
         unnormalize_y = y -> (y .* std_y) .+ mean_y
 
         heads = network.layers[end]
@@ -57,6 +57,9 @@ function load_policy(filename::String)
     end
 
     policy.surrogate = network
+
+    solve_planner!(policy)
+
     return policy
 end
 

@@ -1,14 +1,3 @@
-Sys.islinux() && include("launch_remote.jl")
-using Revise
-using Distributed
-
-@everywhere begin
-    using BetaZero
-    include("representation_robot.jl")
-end
-
-filename_suffix = "robot.bson"
-
 solver = BetaZeroSolver(pomdp=pomdp,
                         updater=up,
                         belief_reward=robot_belief_reward,
@@ -39,7 +28,3 @@ solver.nn_params.normalize_output = true
 # MCTS parameters
 solver.mcts_solver.n_iterations = 2000
 solver.mcts_solver.depth = 200
-
-policy = solve(solver, pomdp)
-BetaZero.save_policy(policy, "data/policy_$filename_suffix")
-BetaZero.save_solver(solver, "data/solver_$filename_suffix")

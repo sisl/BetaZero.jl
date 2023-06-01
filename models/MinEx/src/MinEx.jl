@@ -119,6 +119,16 @@ function POMDPs.reward(m::MinExPOMDP, s, a)
 end
 
 
+function POMDPs.observation(m::MinExPOMDP, a, s)
+    if isterminal(m, s) || a in m.terminal_actions
+        o = -Inf32
+    else
+        o = s.ore[a...]
+    end
+    return o
+end
+
+
 function POMDPs.gen(m::MinExPOMDP, s, a, rng=Random.GLOBAL_RNG)
     # Compute the next state
     sp = deepcopy(s)
@@ -130,11 +140,7 @@ function POMDPs.gen(m::MinExPOMDP, s, a, rng=Random.GLOBAL_RNG)
     end
 
     # observation
-    if isterminal(m, s) || a in m.terminal_actions
-        o = nothing
-    else
-        o = s.ore[a...]
-    end
+    o = observation(m, a, s)
 
     if (a in m.terminal_actions || isterminal(m, s))
         push!(sp.drill_locations, TERMINAL_LOCATION)
@@ -142,6 +148,7 @@ function POMDPs.gen(m::MinExPOMDP, s, a, rng=Random.GLOBAL_RNG)
 
     return (; sp, o, r)
 end
+
 
 
 # Function for handling vector of actions (and therefore vector of observations)
@@ -156,7 +163,7 @@ end
 
 function POMDPTools.obs_weight(m::MinExPOMDP, s, a, sp, o)
     if (isterminal(m, s) || a in m.terminal_actions)
-        w = Float64(isnothing(o))
+        w = Float64(isinf(o))
     else
         w = pdf(Normal(s.ore[a...], m.σ_abc), o)
     end

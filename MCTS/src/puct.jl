@@ -233,7 +233,7 @@ function best_sanode_PUCT(mdp::MDP, tree::PUCTTree, snode::Int, c::Float64, p::V
             pa = p[ai]
             PUCT = q + pa*c*sqrt(Ns)/(n+1)
         end
-        @assert !isnan(PUCT) "PUCT was NaN (q=$q, c=$c, Ns=$Ns, n=$n)"
+        @assert !isnan(PUCT) "PUCT was NaN (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n)"
         @assert !isequal(PUCT, -Inf)
         if PUCT > best_PUCT
             best_PUCT = PUCT

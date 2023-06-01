@@ -154,7 +154,7 @@ function PUCTSolver(;
                     check_repeat_state::Bool=true,
                     check_repeat_action::Bool=true,
                     tree_in_info::Bool=false,
-                    counts_in_info::Bool=false,
+                    counts_in_info::Bool=true,
                     rng::AbstractRNG=Random.GLOBAL_RNG,
                     estimate_value::Any=RolloutEstimator(RandomSolver(rng)),
                     estimate_policy::Any=0,

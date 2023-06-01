@@ -6,3 +6,5 @@ tex/*.log
 tex/data
 scratch
 notes
+.git-moved
+.github-moved

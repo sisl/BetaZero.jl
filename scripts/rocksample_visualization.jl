@@ -1,10 +1,11 @@
 using Compose
 
 function POMDPTools.render(pomdp::RockSamplePOMDP, step;
-    viz_rock_state=true,
-    viz_belief=true,
-    pre_act_text=""
-)
+            viz_rock_state=true,
+            viz_belief=true,
+            pre_act_text="",
+            network=nothing,
+        )
     nx, ny = pomdp.map_size[1] + 1, pomdp.map_size[2] + 1
     cells = []
     for x in 1:nx-1, y in 1:ny-1
@@ -37,7 +38,7 @@ function POMDPTools.render(pomdp::RockSamplePOMDP, step;
             action = render_action(pomdp, step)
         end
     end
-    action_text = render_action_text(pomdp, step, pre_act_text)
+    action_text = render_action_text(pomdp, step, pre_act_text; network)
 
     belief = nothing
     if viz_belief && (get(step, :b, nothing) !== nothing)
@@ -82,23 +83,20 @@ function render_exit(size)
     x = nx
     y = ny
     ctx = context((x - 1) / nx, (ny - y) / ny, 1 / nx, 1 - 1/nx)
-    txt = compose(ctx, Compose.text(-2, 0.6, "EXIT", hcenter, vcenter),
+    txt = compose(ctx, Compose.text(9, 0.535, "EXIT", hcenter, vcenter, Rotation(π/2)),
         Compose.stroke("white"),
         fill("white"),
-        fontsize(16pt),
-        font("Palatino Linotype"))
+        fontsize(12pt),
+        Compose.font("Palatino Linotype"))
     return compose(ctx, txt, Compose.rectangle(), fill("darkred"))
 end
 
 function render_agent(ctx)
     center = compose(context(), Compose.circle(0.5, 0.5, 0.15), fill("orange"), Compose.stroke("black"))
-    # lwheel = compose(context(), ellipse(0.35, 0.5, 0.05, 0.15), fill("orange"), Compose.stroke("black"))
-    # rwheel = compose(context(), ellipse(0.65, 0.5, 0.05, 0.15), fill("orange"), Compose.stroke("black"))
-    # return compose(ctx, center, lwheel, rwheel)
     return compose(ctx, center)
 end
 
-function render_action_text(pomdp::RockSamplePOMDP, step, pre_act_text)
+function render_action_text(pomdp::RockSamplePOMDP, step, pre_act_text; network=nothing)
     actions = ["• Sample •", "North ↑", "East →", "South ↓", "West ←"]
     action_text = "Terminal"
     if get(step, :a, nothing) !== nothing
@@ -106,6 +104,12 @@ function render_action_text(pomdp::RockSamplePOMDP, step, pre_act_text)
             action_text = actions[step.a]
         else
             action_text = "~ Sensing Rock $(step.a - RockSample.N_BASIC_ACTIONS) ~"
+        end
+        if !isnothing(network)
+            v, p = network_lookup(network, step.b)
+            v = round(v, digits=2)
+            pa = round(p[step.a], digits=2)
+            action_text = "$action_text ($v, $pa)"
         end
     end
     action_text = pre_act_text * action_text
@@ -116,8 +120,8 @@ function render_action_text(pomdp::RockSamplePOMDP, step, pre_act_text)
     txt = compose(ctx, Compose.text(0.5, -0.8, action_text, hcenter),
         Compose.stroke("black"),
         fill("black"),
-        fontsize(16pt),
-        font("Palatino Linotype"))
+        fontsize(10pt),
+        Compose.font("Palatino Linotype"))
     return compose(ctx, txt, Compose.rectangle(), Compose.stroke("black"), fill("white"))
 end
 
@@ -126,11 +130,11 @@ function render_action(pomdp::RockSamplePOMDP, step)
         ctx = cell_ctx(step.s.pos, pomdp.map_size .+ (1, 1))
         if in(step.s.pos, pomdp.rocks_positions)
             rock_ind = findfirst(isequal(step.s.pos), pomdp.rocks_positions)
-            clr = step.s.rocks[rock_ind] ? "green" : "red"
+            clr = step.s.rocks[rock_ind] ? "lightgreen" : "yellow"
         else
             clr = "black"
         end
-        return compose(ctx, ngon(0.5, 0.5, 0.1, 6), Compose.stroke("gray"), fill(clr))
+        return compose(ctx, ngon(0.5, 0.5, 0.2, 6), Compose.stroke("gray"), fill(clr))
     elseif step.a > RockSample.N_BASIC_ACTIONS
         rock_ind = step.a - RockSample.N_BASIC_ACTIONS
         rock_pos = pomdp.rocks_positions[rock_ind]
@@ -141,4 +145,10 @@ function render_action(pomdp::RockSamplePOMDP, step)
         return compose(context((w - sz) / 2, (h - sz) / 2, sz, sz), line([rob_pos, rock_pos]), Compose.stroke("orange"), linewidth(0.01w))
     end
     return nothing
+end
+
+
+function rocksample_policy_plot(p; colors=vcat(:black, fill(:orange,4), fill(:gray, 15)))
+    xticklabels = (1:20, string.(vcat(:x, :N, :E, :S, :W, 1:15)))
+    return Plots.bar(p, c=colors, xticks=xticklabels, label=false, size=(600,300))
 end

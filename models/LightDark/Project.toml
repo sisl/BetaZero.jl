@@ -1,6 +1,5 @@
 name = "LightDark"
 uuid = "a1c7e911-b2d9-4cdc-ae72-88f9232b4333"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

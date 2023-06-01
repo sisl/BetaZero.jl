@@ -3,8 +3,6 @@ using Revise
 using Distributed
 
 @everywhere begin
-    using Revise
     using BetaZero
-    include("representation_lightdark.jl")
-    include("plot_lightdark.jl")
+    include("representation_robot.jl")
 end

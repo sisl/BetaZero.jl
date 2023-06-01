@@ -137,3 +137,18 @@ function smooth(v, weight = 0.6)
     end
     return smoothed
 end
+
+
+function dirichlet_noise(p; α=1, ϵ=0.25)
+    k = length(p)
+    η = rand(Dirichlet(k, α))
+    return (1 - ϵ)*p + ϵ*η
+end
+
+
+"""
+Return initial Q function to bootstrap the search.
+"""
+function bootstrap(f)
+    return (bmdp,b,a)->bmdp.belief_reward(bmdp.pomdp, b, a, nothing) + discount(bmdp)*value_lookup(f, @gen(:sp)(bmdp, b, a))
+end

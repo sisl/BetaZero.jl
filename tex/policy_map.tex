@@ -6,7 +6,7 @@
 \pgfplotsset{compat=newest}
 \usetikzlibrary{backgrounds}
 
-\tdplotsetmaincoords{65}{30} % 30 for slight angle, 45 for head on
+\tdplotsetmaincoords{75}{30} % 30 for slight angle, 45 for head on (65 in first coord for closer to "top-down" view, 75 for NeurIPS to reduce height)
 
 % \newcommand*{\SHOWLABELS}{}
 % \newcommand*{\SHOWGRID}{}
@@ -29,81 +29,80 @@
 
 \newcommand*{\scale}{2}
 \newcommand*{\step}{0.5/\scale}
+%% see "settings.tex" files for \capscale
+\newcommand*{\capscale}{1} % note, controls the cap of the bars
 
 % https://tex.stackexchange.com/a/166290
 \begin{document}
 
-\pgfplotstableread{data/drills.dat}{\firsttable}
-    \pgfplotstablegetrowsof{data/drills.dat}
-    \pgfmathtruncatemacro{\rows}{\pgfplotsretval-1} % Put the number of row minus one in \rows, to use : \foreach \p in {0,...,\rows}
-
-\pgfmathsetmacro{\Zscale}{10} % adjust maximum z values
-
+% https://tex.stackexchange.com/a/166290
+\pgfplotstableread{data/drills.dat}{\firsttable}%
+    \pgfplotstablegetrowsof{data/drills.dat}%
+    \pgfmathtruncatemacro{\rows}{\pgfplotsretval-1}% Put the number of row minus one in \rows, to use : \foreach \p in {0,...,\rows}
+\pgfmathsetmacro{\Zscale}{10}% adjust maximum z values
 % Assign variables min, max
-\pgfplotstablegetelem{0}{[index] 0}\of{\firsttable}
-    \pgfmathsetmacro{\minX}{\pgfplotsretval/\scale}
-\pgfplotstablegetelem{0}{[index] 1}\of{\firsttable}
-    \pgfmathsetmacro{\minY}{\pgfplotsretval/\scale}
-\pgfplotstablegetelem{0}{[index] 2}\of{\firsttable}
-    \pgfmathsetmacro{\minZ}{\pgfplotsretval/\scale}
-\pgfplotstablegetelem{1}{[index] 0}\of{\firsttable}
-    \pgfmathsetmacro{\maxX}{\pgfplotsretval/\scale}
-\pgfplotstablegetelem{1}{[index] 1}\of{\firsttable}
-    \pgfmathsetmacro{\maxY}{\pgfplotsretval/\scale}
-\pgfplotstablegetelem{1}{[index] 2}\of{\firsttable}
-    \pgfmathsetmacro{\maxZ}{\pgfplotsretval/\scale}
-
-\pgfmathsetmacro{\Zceiling}{4/\maxZ/\scale} % contain the values of z between 0 and 4 cm (provided that they are positiv)
-
-
-\ifdefined\SHOWMAP
-    \pgfplotstableread{data/map.dat}{\maptable}
-        \pgfplotstablegetrowsof{data/map.dat}
-        \pgfmathtruncatemacro{\maprows}{\pgfplotsretval-1}
-
-    % Assign variables min and max
-    \pgfplotstablegetelem{0}{[index] 0}\of{\maptable}
-        \pgfmathsetmacro{\minXS}{\pgfplotsretval/\scale}
-    \pgfplotstablegetelem{0}{[index] 1}\of{\maptable}
-        \pgfmathsetmacro{\minYS}{\pgfplotsretval/\scale}
-    \pgfplotstablegetelem{0}{[index] 2}\of{\maptable}
-        \pgfmathsetmacro{\minZS}{\pgfplotsretval/\scale}
-    \pgfplotstablegetelem{1}{[index] 0}\of{\maptable}
-        \pgfmathsetmacro{\maxXS}{\pgfplotsretval/\scale}
-    \pgfplotstablegetelem{1}{[index] 1}\of{\maptable}
-        \pgfmathsetmacro{\maxYS}{\pgfplotsretval/\scale}
-    \pgfplotstablegetelem{1}{[index] 2}\of{\maptable}
-        \pgfmathsetmacro{\maxZS}{\pgfplotsretval/\scale}
-\fi
-
-\pgfplotstableread{data/decisions.dat}{\decisiontable}
-    \pgfplotstablegetelem{0}{[index] 0}\of{\decisiontable}
-        \let\nodecision\pgfplotsretval
-    \pgfplotstablegetelem{0}{[index] 1}\of{\decisiontable}
-        \let\yesdecision\pgfplotsretval
-
-\ifdefined\SHOWACTION
-    \pgfplotstableread{data/action.dat}{\actiontable}
-        \pgfplotstablegetelem{0}{[index] 0}\of{\actiontable}
-            \pgfmathsetmacro{\actionx}{\pgfplotsretval/\scale}
-        \pgfplotstablegetelem{0}{[index] 1}\of{\actiontable}
-            \pgfmathsetmacro{\actiony}{\pgfplotsretval/\scale}
-        \pgfplotstablegetelem{0}{[index] 2}\of{\actiontable}
-            \let\actioninfo\pgfplotsretval
-    \colorlet{actioncolor}[hsb]{red}
-\fi
+\pgfplotstablegetelem{0}{[index] 0}\of{\firsttable}%
+    \pgfmathsetmacro{\minX}{\pgfplotsretval/\scale}%
+\pgfplotstablegetelem{0}{[index] 1}\of{\firsttable}%
+    \pgfmathsetmacro{\minY}{\pgfplotsretval/\scale}%
+\pgfplotstablegetelem{0}{[index] 2}\of{\firsttable}%
+    \pgfmathsetmacro{\minZ}{\pgfplotsretval}%
+\pgfplotstablegetelem{1}{[index] 0}\of{\firsttable}%
+    \pgfmathsetmacro{\maxX}{\pgfplotsretval/\scale}%
+\pgfplotstablegetelem{1}{[index] 1}\of{\firsttable}%
+    \pgfmathsetmacro{\maxY}{\pgfplotsretval/\scale}%
+\pgfplotstablegetelem{1}{[index] 2}\of{\firsttable}%
+    \pgfmathsetmacro{\maxZ}{\pgfplotsretval}%
+\pgfmathsetmacro{\Zceiling}{8/\scale}% contain the values of z
+\pgfmathsetmacro{\epsZ}{0.5} % Z-min epsilon
+\ifdefined\SHOWMAP%
+    \pgfplotstableread{data/map.dat}{\maptable}%
+        \pgfplotstablegetrowsof{data/map.dat}%
+        \pgfmathtruncatemacro{\maprows}{\pgfplotsretval-1}%
+    \pgfplotstablegetelem{0}{[index] 0}\of{\maptable}%
+        \pgfmathsetmacro{\minXS}{\pgfplotsretval/\scale}%
+    \pgfplotstablegetelem{0}{[index] 1}\of{\maptable}%
+        \pgfmathsetmacro{\minYS}{\pgfplotsretval/\scale}%
+    \pgfplotstablegetelem{0}{[index] 2}\of{\maptable}%
+        \pgfmathsetmacro{\minZS}{\pgfplotsretval/\scale}%
+    \pgfplotstablegetelem{1}{[index] 0}\of{\maptable}%
+        \pgfmathsetmacro{\maxXS}{\pgfplotsretval/\scale}%
+    \pgfplotstablegetelem{1}{[index] 1}\of{\maptable}%
+        \pgfmathsetmacro{\maxYS}{\pgfplotsretval/\scale}%
+    \pgfplotstablegetelem{1}{[index] 2}\of{\maptable}%
+        \pgfmathsetmacro{\maxZS}{\pgfplotsretval/\scale}%
+\fi%
+\pgfplotstableread{data/decisions.dat}{\decisiontable}%
+    \pgfplotstablegetelem{0}{[index] 0}\of{\decisiontable}%
+        \let\nodecision\pgfplotsretval%
+    \pgfplotstablegetelem{0}{[index] 1}\of{\decisiontable}%
+        \let\yesdecision\pgfplotsretval%
+\ifdefined\SHOWACTION%
+    \pgfplotstableread{data/action.dat}{\actiontable}%
+        \pgfplotstablegetelem{0}{[index] 0}\of{\actiontable}%
+            \pgfmathsetmacro{\actionx}{\pgfplotsretval/\scale}%
+        \pgfplotstablegetelem{0}{[index] 1}\of{\actiontable}%
+            \pgfmathsetmacro{\actiony}{\pgfplotsretval/\scale}%
+        \pgfplotstablegetelem{0}{[index] 2}\of{\actiontable}%
+            \let\actioninfo\pgfplotsretval%
+    \colorlet{actioncolor}[hsb]{red}%
+\fi%
 
 % Defining by hand the axis
-\begin{tikzpicture}[x={(0cm,-0.5cm)},y={(0cm,0.5cm)},z={(0cm,4 cm)}, line join=round, tdplot_main_coords]
+\begin{tikzpicture}[x={(0cm,-0.5cm)},y={(0cm,0.5cm)},z={(0cm,4cm)}, line join=round, tdplot_main_coords]
 
 % Defining hsb color to have a color scale
-\colorlet{highcolorbar}[hsb]{teal} % teal
-\colorlet{lowcolorbar}[hsb]{lime} % lime
+\colorlet{highcolorbar}[hsb]{gray} % teal, black
+\colorlet{lowcolorbar}[hsb]{white} % lime, white
 
-\definecolor{viridis_yellow}{HTML}{fde725}
+
+\definecolor{viridis_yellow}{HTML}{fde725} 
 \definecolor{viridis_blue}{HTML}{440154}
-\colorlet{highcolormap}[hsb]{black} % viridis_yellow
-\colorlet{lowcolormap}[hsb]{white} % viridis_blue
+\definecolor{highground}{HTML}{e1e697} % black
+\definecolor{lowground}{HTML}{44342a} % white
+\colorlet{highcolormap}[hsb]{highground}
+\colorlet{lowcolormap}[hsb]{lowground}
+
 
 \ifdefined\SHOWMINIAXES
     % Drawing the system of axes
@@ -165,12 +164,12 @@
         \pgfplotstablegetelem{\p}{[index] 1}\of{\firsttable}    % And as the drawings just pile up, the last one just goes on top of the previous drawings.
         \pgfmathsetmacro{\y}{\pgfplotsretval/\scale}
         \pgfplotstablegetelem{\p}{[index] 2}\of{\firsttable}    % The order here works with chosen view angle, if you change the angle, you might have to change it.
-        \pgfmathsetmacro{\z}{\pgfplotsretval/\scale}
+        \pgfmathsetmacro{\z}{\Zceiling*(\pgfplotsretval - (\minZ-\epsZ))/(\maxZ - (\minZ-\epsZ))}
 
         \pgfmathsetmacro{\w}{\step} % half the width of the bars
 
         % \ifnum0<\z % TODO: Only plot non-zero actions
-            \pgfmathtruncatemacro{\teinte}{100-((\z/\maxZ)*100)}
+            \pgfmathtruncatemacro{\teinte}{100*(1 - \z/\Zceiling)}
             \colorlet{colour}[rgb]{lowcolorbar!\teinte!highcolorbar}
 
             % Unseen faces from orginal view, but if you change the angle ....
@@ -189,6 +188,7 @@
             % Top face
             \pgfmathparse{\actionx==\x && \actiony==\y}
             \ifnum\pgfmathresult=1
+                % Show action on topface
                 \fill[top color=actioncolor!40!gray, bottom color=actioncolor!80!gray] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z);
             \else
                 \fill[top color=colour!40!gray, bottom color=colour!80!gray] (\x-\w,\y-\w,\z) -- (\x-\w,\y+\w,\z) -- (\x+\w,\y+\w,\z) -- (\x+\w,\y-\w,\z) -- (\x-\w,\y-\w,\z);
@@ -198,18 +198,21 @@
         % \fi
 }
 
+\colorlet{defaultbar}{lightgray} % brown
+
+
 \ifthenelse{\equal{\actioninfo}{abandon}}
 {
     \colorlet{nocolor}{red}
-    \colorlet{yescolor}{brown}
+    \colorlet{yescolor}{defaultbar}
 }{
     \ifthenelse{\equal{\actioninfo}{mine}}
     {
-        \colorlet{nocolor}{brown}
+        \colorlet{nocolor}{defaultbar}
         \colorlet{yescolor}{red}    
     }{
-        \colorlet{nocolor}{brown}
-        \colorlet{yescolor}{brown}    
+        \colorlet{nocolor}{defaultbar}
+        \colorlet{yescolor}{defaultbar}    
     }
 }
 
@@ -217,7 +220,8 @@
 \begin{axis}[
     tuftelike,
     xbar,
-    at={(2cm,-4cm)},
+    at={(2cm,-2.7cm)}, 
+    % at={(2cm,-4cm)}, % When using {65} pitch angle
     y=-0.5cm,
     bar width=0.3cm,
     bar shift=0pt,

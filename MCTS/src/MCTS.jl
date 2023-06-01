@@ -46,7 +46,13 @@ export
     get_state_node,
     MaxQ,
     MaxN,
-    MaxQN
+    MaxQN,
+    MaxWeightedQN,
+    SampleWeightedQN,
+    SampleQN,
+    SampleN,
+    MaxZQN,
+    SampleZQN
 
 export
     AbstractStateNode,

@@ -52,6 +52,12 @@ function compute_optimal_return_minex(pomdp, ds0; include_drills=false)
 end
 
 
+function compute_lowerbound_return_minex(pomdp)
+    # compute returns if fully drilled all locations, then made the decision to abandon
+    return sum(discount(pomdp)^(t-1)*-pomdp.drill_cost for t in 1:length(actions(pomdp))-2)
+end
+
+
 POMDPs.convert_s(::Type{A}, b::ParticleHistoryBelief{MinExState}, m::BetaZero.BeliefMDP) where A<:AbstractArray = Flux.unsqueeze(Float32.(BetaZero.input_representation(b)); dims=4)
 # POMDPs.convert_s(::Type{ParticleHistoryBelief{MinExState}}, b::A, m::BetaZero.BeliefMDP) where A<:AbstractArray = ParticleHistoryBelief(particles=ParticleCollection(rand(LDNormalStateDist(b[1], b[2]), 500)))
 
@@ -78,12 +84,23 @@ end
 
 
 ## Plotting
+function plot_belief(b::ParticleHistoryBelief{MinExState}, s=nothing; a=nothing, cmap=cgrad(["#44342a", "#e1e697"]), linecmap=cgrad([:white, :white]), scale=1, applyclims=false)
+    # cmap = cgrad(:turbid, rev=true)
+    # linecmap = cgrad([:white, :black])
 
-function plot_belief(b::ParticleHistoryBelief{MinExState}, s=nothing)
+    function show_decision()
+        if !isnothing(a) && a isa Symbol
+            annotate!(16, 30, ("$a", 16, :white, :center))
+        end
+    end
+
     b̃ = BetaZero.input_representation(b)
-    μ = b̃[:,:,1]
-    σ = b̃[:,:,2]
-    plt_mean = heatmap(μ, ratio=1, c=:viridis, title="\$\\mu(b)\$", clims=(0,1))
+    μ = b̃[:,:,1] .^ (1/scale)
+    σ = b̃[:,:,2] .^ (1/scale)
+    plt_mean = heatmap(μ, ratio=1, c=cmap, title="\$\\mu(b)\$")
+    if applyclims
+        plot!(clims=(0,1))
+    end
     current_ylims = ylims()
     xlims!(current_ylims...)
     drill_style = (label=false, c=:black, mc=:darkred, msc=:white, marker=:square, ms=4)
@@ -91,20 +108,25 @@ function plot_belief(b::ParticleHistoryBelief{MinExState}, s=nothing)
         xloc = map(last, s.drill_locations) # Note y-first, x-last
         yloc = map(first, s.drill_locations)
         n = length(xloc)
-        cmap = cgrad([:white, :black])
         if n > 1
             for i in 1:n-1
                 x = xloc[i:i+1]
                 y = yloc[i:i+1]
-                c = n == 2 ? get(cmap, 0) : get(cmap, (i-1)/(n-2))
-                plot!(x, y, arrow=:closed, lw=2, color=c, label=false)
+                if x[end] != -1 && y[end] != -1 # final decision has been made
+                    c = n == 2 ? get(linecmap, 0) : get(linecmap, (i-1)/(n-2))
+                    plot!(x, y, arrow=:closed, lw=2, color=c, label=false)
+                end
             end
         end
         scatter!(xloc, yloc; drill_style...)
     end
     ylims!(current_ylims...)
+    show_decision()
 
-    plt_std =  heatmap(σ, ratio=1, c=:viridis, title="\$\\sigma(b)\$", clims=(0.0, 0.2))
+    plt_std =  heatmap(σ, ratio=1, c=cmap, title="\$\\sigma(b)\$")
+    if applyclims
+        plot!(clims=(0.0, 0.2))
+    end
     current_ylims = ylims()
     xlims!(current_ylims...)
     if !isnothing(s) && !isempty(s.drill_locations)
@@ -113,13 +135,14 @@ function plot_belief(b::ParticleHistoryBelief{MinExState}, s=nothing)
         scatter!(xloc, yloc; drill_style...)
     end
     ylims!(current_ylims...)
+    show_decision()
 
     return plot(plt_mean, plt_std, layout=2, margin=4Plots.mm, size=(1000, 400))
 end
 
 
-function plot_state(s::MinExState)
-    heatmap(s.ore, ratio=1, c=:viridis, title="state", clims=(0,1), margin=4Plots.mm, size=(500, 400))
+function plot_state(s::MinExState; cmap=cgrad(["#44342a", "#e1e697"]))
+    heatmap(s.ore, ratio=1, c=cmap, title="state", clims=(0,1), margin=4Plots.mm, size=(500, 400))
     return xlims!(ylims()...)
 end
 

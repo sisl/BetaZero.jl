@@ -1,6 +1,5 @@
 name = "BetaZero"
 uuid = "c2a2f090-4363-4bef-a985-c7cb903c4681"
-authors = ["rmoss92@gmail.com"]
 version = "0.1.0"
 
 [deps]

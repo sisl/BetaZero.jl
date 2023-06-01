@@ -1,6 +1,5 @@
 name = "MinEx"
 uuid = "5e646c51-9649-468d-a822-1bc45f963efc"
-authors = ["Robert Moss <rmoss92@gmail.com>"]
 version = "0.1.0"
 
 [deps]

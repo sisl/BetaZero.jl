@@ -1,31 +1,24 @@
 using Random
 include(joinpath(@__DIR__, "..", "launch_lightdark.jl"))
 
-SUFFIXES = ["maxqn", "maxn", "maxq"]
-CRITERIA = [MaxQN(), MaxN(), MaxQ()]
+USE_PRIORITY = [false] # already ran results with prioritized action selection ("solver_lightdark_maxqn_seedX.bson")
 
 global solver, policy, filename_suffix
 
-for i in eachindex(CRITERIA)
-    suffix = SUFFIXES[i]
-    criterion = CRITERIA[i]
+for use_priority in USE_PRIORITY
+    suffix = use_priority ? "prioritize" : "random"
     for seed in 1:3
         global solver, policy, filename_suffix
         Random.seed!(seed)
 
         include(joinpath(@__DIR__, "..", "solver_lightdark.jl"))
-        solver.mcts_solver.final_criterion = criterion
+        solver.nn_params.use_prioritized_action_selection = use_priority
 
-        @info solver.mcts_solver.final_criterion, seed
+        @info solver.nn_params.use_prioritized_action_selection, seed
 
         policy = solve(solver, pomdp)
         filename_suffix = "lightdark_$(suffix)_seed$seed.bson"
         BetaZero.save_policy(policy, "policy_$filename_suffix")
         BetaZero.save_solver(solver, "solver_$filename_suffix")
-
-        try
-            value_and_policy_plot(pomdp, policy)
-            Plots.savefig("value_policy_plot_$filename_suffix.png")
-        catch end
     end
 end

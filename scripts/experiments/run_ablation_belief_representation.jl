@@ -1,31 +1,24 @@
 using Random
 include(joinpath(@__DIR__, "..", "launch_lightdark.jl"))
 
-SUFFIXES = ["maxqn", "maxn", "maxq"]
-CRITERIA = [MaxQN(), MaxN(), MaxQ()]
+USE_STD = [false] # already ran results with [μ, σ] ("solver_lightdark_maxqn_seedX.bson")
 
 global solver, policy, filename_suffix
 
-for i in eachindex(CRITERIA)
-    suffix = SUFFIXES[i]
-    criterion = CRITERIA[i]
+for use_std in USE_STD
+    suffix = use_std ? "mean_std" : "mean_only"
     for seed in 1:3
         global solver, policy, filename_suffix
         Random.seed!(seed)
 
         include(joinpath(@__DIR__, "..", "solver_lightdark.jl"))
-        solver.mcts_solver.final_criterion = criterion
+        !use_std && @warn "Including STD in belief rep. is done manually in BetaZero.input_representation"
 
-        @info solver.mcts_solver.final_criterion, seed
+        @info use_std, seed
 
         policy = solve(solver, pomdp)
         filename_suffix = "lightdark_$(suffix)_seed$seed.bson"
         BetaZero.save_policy(policy, "policy_$filename_suffix")
         BetaZero.save_solver(solver, "solver_$filename_suffix")
-
-        try
-            value_and_policy_plot(pomdp, policy)
-            Plots.savefig("value_policy_plot_$filename_suffix.png")
-        catch end
     end
 end
