@@ -168,6 +168,7 @@ See the parameters, their descriptions, and their defaults in [`src/parameters.j
     └── tex                     # LaTeX files for the TikZ mineral exploration policy maps.
 
 [1] https://github.com/JuliaPOMDP/MCTS.jl
+
 [2] https://github.com/sisl/RoombaPOMDPs.jl
 
 ## Citation
