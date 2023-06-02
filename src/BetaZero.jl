@@ -34,8 +34,6 @@ import Flux.Zygote: ignore_derivatives
 
 include("belief_mdp.jl")
 include("interface.jl")
-include("onestep_lookahead.jl")
-include("bias.jl")
 include("parameters.jl")
 include("running_stats.jl")
 
@@ -46,13 +44,10 @@ export
     BetaZeroNetworkParameters,
     BetaZeroGPParameters,
     BeliefMDP,
-    OneStepLookaheadSolver,
     RawNetworkPolicy,
     RawValueNetworkPolicy,
     initialize_network,
     calc_loss_weight,
-    value_plot,
-    policy_plot,
     value_and_policy_plot,
     value_policy_uncertainty_plot,
     uncertainty_plot,
@@ -211,7 +206,7 @@ function solve_planner!(policy::BetaZeroPolicy, f::Surrogate=policy.surrogate)
     bmdp = policy.planner.mdp
     policy.planner.solver.reset_callback = (mdp, s)->false
     policy.planner.solver.timer = ()->1e-9 * time_ns()
-    if policy.planner.solver.init_Q isa Function
+    if policy.planner.solver.init_Q isa Function || policy.parameters.params.bootstrap_q
         policy.planner.solver.init_Q = bootstrap(f) # re-apply bootstrap
     end
     mcts_planner = solve(policy.planner.solver, bmdp)

@@ -168,6 +168,7 @@ Parameters for the BetaZero algorithm.
     skip_missing_reward_signal::Bool = false  # When running MCTS episodes, filter out trajectories that had no reward signal (i.e., zero reward everywhere)
     train_missing_on_predicted::Bool = false  # Use predicted value in place of missing reward signal episodes
     eval_on_accuracy::Bool = false            # If evaluating (i.e., `n_evaluate > 0`), then base comparison on accuracy of the two networks
+    bootstrap_q::Bool = false                 # Bootstrap the `init_Q` using the value network when a new (b,a) node is added during MCTS.
 end
 
 

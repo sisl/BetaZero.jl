@@ -41,20 +41,9 @@ end
     using StaticArrays
     using LightDark
     using RockSample
-    using MinEx # ! TODO.
+    using MinEx
 
     include("init_param.jl")
-
-
-    function solve_osla(f, pomdp, up, belief_reward, next_action=nothing; n_actions=10, n_obs=10)
-        @show n_actions, n_obs
-        solver = OneStepLookaheadSolver(n_actions=n_actions, n_obs=n_obs)
-        solver.estimate_value = b->BetaZero.value_lookup(f, b)
-        solver.next_action = next_action
-        bmdp = BeliefMDP(pomdp, up, belief_reward)
-        planner = solve(solver, bmdp)
-        return planner
-    end
 
     function extract_mcts(solver, pomdp)
         mcts_solver = deepcopy(solver.mcts_solver)
@@ -436,8 +425,6 @@ for ϵ_greedy in ϵ_sweep
                                     "BetaZero"=>bz_policy,
                                     # "BetaZero (ensemble)"=>en_policy,
                                     # "Random"=>RandomPolicy(pomdp),
-                                    # "One-Step Lookahead"=>solve_osla(bz_policy.surrogate, pomdp, up, lightdark_belief_reward, bz_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
-                                    # "One-Step Lookahead (ensemble)"=>solve_osla(en_policy.surrogate, pomdp, up, lightdark_belief_reward, en_policy.planner.next_action; n_actions=osla_n_actions, n_obs=osla_n_obs),
                                     # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
                                     # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
                                     # "POMCPOW"=>solve_pomcpow(pomdp, pomcpow_iteration_factor*n_iterations, override=true, use_heuristics=run_with_heuristics), # Note override for table comparison.
