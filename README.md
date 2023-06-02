@@ -13,13 +13,13 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
 
 To install the BetaZero solver, run:
 
-```bash
+```julia
 using Pkg
 pkg"add https://github.com/sisl/BetaZero.jl"
 ```
 
 (**Optional**) To install the supporting example POMDP models (e.g., `LightDark` and `MinEx`), the `RemoteJobs` package, and the `ParticleBeliefs` wrapper, run:
-```bash
+```julia
 using BetaZero
 install_extras()
 ```
