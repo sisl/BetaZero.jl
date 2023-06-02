@@ -1,6 +1,6 @@
 # BetaZero.jl
 
-Belief-State Planning for Long-Horizon POMDPs using Learned Approximations. Integrated into the [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) ecosystem.
+Belief-state planning algorithm for POMDPs using learned approximations; integrated into the [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) ecosystem.
 
 <!-- ![light mode](/media/betazero.svg#gh-light-mode-only) -->
 <!-- ![dark mode](/media/betazero-dark.svg#gh-dark-mode-only) -->
