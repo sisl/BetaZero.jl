@@ -274,9 +274,9 @@ solver.mcts_solver.final_criterion = SampleZQN(τ=0, zq=1, zn=1)
     │   └── Tiger               # POMDP model for the tiger problem.
     └── tex                     # LaTeX files for the TikZ mineral exploration policy maps.
 
-[1] https://github.com/JuliaPOMDP/MCTS.jl
+[1] [https://github.com/JuliaPOMDP/MCTS.jl](https://github.com/JuliaPOMDP/MCTS.jl)
 
-[2] https://github.com/sisl/RoombaPOMDPs.jl
+[2] [https://github.com/sisl/RoombaPOMDPs.jl](https://github.com/JuliaPOMDP/MCTS.jl)
 
 ## Citation
 
