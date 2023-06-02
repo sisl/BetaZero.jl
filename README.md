@@ -4,8 +4,10 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
 
 <!-- ![light mode](/media/betazero.svg#gh-light-mode-only) -->
 <!-- ![dark mode](/media/betazero-dark.svg#gh-dark-mode-only) -->
-<img src="./media/betazero.svg">
 
+<p align="center">
+    <img src="./media/betazero.svg">
+</p>
 
 ## Installation
 
