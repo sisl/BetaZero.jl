@@ -1,13 +1,16 @@
 module BetaZero
 
 using Reexport
+
+include(joinpath(@__DIR__, "..", "submodules", "MCTS", "src", "MCTS.jl"))
+@reexport using .MCTS
+
 @reexport using BSON
 @reexport using DataStructures
 @reexport using Flux
 @reexport using Flux.NNlib
 @reexport using Flux.MLUtils
 @reexport using GaussianProcesses
-@reexport using MCTS
 @reexport using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 @reexport using ParticleFilters
 @reexport using POMDPs
@@ -20,6 +23,7 @@ using JLD2
 using LinearAlgebra
 using Optim
 using Parameters
+using Pkg
 using POMDPTools
 using ProgressMeter
 using Statistics
@@ -73,7 +77,8 @@ export
     value_lookup,
     policy_lookup,
     dirichlet_noise,
-    bootstrap
+    bootstrap,
+    install_extras
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
@@ -97,7 +102,7 @@ export
                                                 tree_in_info=false,
                                                 counts_in_info=true, # Note, required for policy vector.
                                                 show_progress=false,
-                                                final_criterion=MaxQN(),
+                                                final_criterion=MaxZQN(zq=1, zn=1),
                                                 estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a surrogate lookup
     data_collection_policy::Policy = RandomPolicy(Random.GLOBAL_RNG, pomdp, updater) # Policy used for data collection (if indicated to use different policy than the BetaZero on-policy)
     use_data_collection_policy::Bool = false # Use provided policy for data collection.

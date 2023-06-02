@@ -112,7 +112,7 @@ function rolling_max(Y, Y2)
 			prev_max_idx = argmax(max_Y[1:i-1])
 			prev_max = max_Y[prev_max_idx]
 			curr_max_idx = Y[i] > prev_max ? i : prev_max_idx
-			max_Y[i] = Y[curr_max_idx]			
+			max_Y[i] = Y[curr_max_idx]
             max_Y2[i] = Y2[curr_max_idx]
 		end
 	end
@@ -151,4 +151,24 @@ Return initial Q function to bootstrap the search.
 """
 function bootstrap(f)
     return (bmdp,b,a)->bmdp.belief_reward(bmdp.pomdp, b, a, nothing) + discount(bmdp)*value_lookup(f, @gen(:sp)(bmdp, b, a))
+end
+
+
+"""
+Install supporting example POMDP models, the `RemoteJobs` package, and the `ParticleBeliefs` wrapper.
+"""
+function install_extras()
+    @info "Installing POMDP models and tools..."
+    packages = [
+        PackageSpec(url=joinpath(@__DIR__, "submodules", "LightDark")),
+        PackageSpec(url="https://github.com/sisl/MineralExploration"),
+        PackageSpec(url=joinpath(@__DIR__, "submodules", "MinEx")),
+        PackageSpec(url=joinpath(@__DIR__, "submodules", "RemoteJobs")),
+        PackageSpec(url=joinpath(@__DIR__, "submodules", "ParticleBeliefs")),
+    ]
+
+    # Run dev altogether
+    # This is important that it's run together so there
+    # are no "expected pacakge X to be registered" errors.
+    Pkg.develop(packages)
 end

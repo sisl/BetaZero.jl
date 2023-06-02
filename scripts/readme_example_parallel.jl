@@ -1,6 +1,5 @@
-using RemoteJobs
-machine_specs = [("user@host1", 25), ("user@host2", 25)] # launch 50 processes across two separate hosts
-launch_remote_workers(machine_specs)
+using Distributed
+addprocs([("user@hostname1", 25), ("user@hostname2", 25)], tunnel=true) # launch 50 processes across two separate hosts
 
 @everywhere begin
     using BetaZero

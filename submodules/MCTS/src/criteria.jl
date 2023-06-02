@@ -103,31 +103,6 @@ function select_best(crit::SampleQN, tree, snode::Int)
 end
 
 
-
-# @with_kw struct SampleScheduledQN
-#     τ = 1
-#     T = 20
-#     count = 0
-# end
-
-# """
-# Return the best action using information from both Q-values and visit counts.
-# """
-# function select_best(crit::SampleScheduledQN, tree, snode::Int)
-#     τ = crit.τ
-#     T = crit.T
-#     if τ == 0
-#         return select_best(MaxQN(), tree, snode)
-#     else
-#         Q, N = compute_qvalues_and_counts(tree, snode)
-#         QN = (softmax(Q) .* (N ./ sum(N))) .^ (1/τ)
-#         P = normalize(QN, 1)
-#         A = tree.children[snode]
-#         return rand(SparseCat(A, P))
-#     end
-# end
-
-
 @with_kw struct MaxWeightedQN
     w = 0.5
 end
