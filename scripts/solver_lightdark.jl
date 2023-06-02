@@ -3,13 +3,12 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         belief_reward=lightdark_belief_reward,
                         params=BetaZeroParameters(
                             n_iterations=30,
-                            n_data_gen=500
+                            n_data_gen=500,
                         ),
                         collect_metrics=true,
                         verbose=true,
                         save_plots=true,
-                        plot_incremental_data_gen=true,
-                        accuracy_func=lightdark_accuracy_func)
+                        plot_incremental_data_gen=true)
 
 # Neural network
 solver.nn_params.training_epochs = 50

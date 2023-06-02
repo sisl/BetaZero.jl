@@ -11,8 +11,7 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         save_plots=true,
                         plot_incremental_data_gen=true,
                         plot_incremental_holdout=true,
-                        plot_metrics_filename="intermediate_metrics_figure_minex.png",
-                        accuracy_func=simple_minex_accuracy_func)
+                        plot_metrics_filename="intermediate_metrics_figure_minex.png")
 
 # MCTS parameters
 solver.mcts_solver = PUCTSolver(n_iterations=50,

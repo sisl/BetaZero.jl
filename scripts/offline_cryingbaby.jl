@@ -18,8 +18,7 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         ),
                         collect_metrics=true,
                         verbose=true,
-                        plot_incremental_data_gen=true,
-                        accuracy_func=cryingbaby_accuracy_func)
+                        plot_incremental_data_gen=true)
 
 # Neural network
 solver.nn_params.n_samples = 500

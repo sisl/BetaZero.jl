@@ -34,7 +34,7 @@ function BetaZero.input_representation(b::ParticleCollection{RSState{15}}; use_h
     return Float32[pos..., μ_rocks..., σ_rocks...]
 end
 
-function rocksample_accuracy_func(pomdp, b0, s0, states, actions, returns)
+function BetaZero.accuracy(pomdp::RockSamplePOMDP, b0, s0, states, actions, returns)
     # When we sampled, did we sample only the "good" rocks
     sampled_only_good = all(map(i->begin
         s = states[i]

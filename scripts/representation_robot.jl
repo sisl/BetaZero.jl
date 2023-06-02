@@ -8,8 +8,7 @@ using RobotLocalization
 pomdp = RobotPOMDP()
 up = updater(pomdp)
 
-# TODO: BetaZero.accuracy(::RobotPOMDP)
-function robot_accuracy_func(pomdp::RobotPOMDP, b0, s0, states, actions, returns)
+function BetaZero.accuracy(pomdp::RobotPOMDP, b0, s0, states, actions, returns)
     return states[end].status == 1 # Correctly left the room
 end
 

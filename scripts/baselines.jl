@@ -17,13 +17,10 @@ TestPOMDPType = MinExPOMDP
 
 if TestPOMDPType == LightDarkPOMDP
     include("launch_lightdark.jl")
-    accuracy_func = lightdark_accuracy_func
 elseif TestPOMDPType == RockSamplePOMDP
     include("launch_rocksample.jl")
-    accuracy_func = rocksample_accuracy_func
 elseif TestPOMDPType == MinExPOMDP
     include("launch_minex.jl")
-    accuracy_func = simple_minex_accuracy_func
 end
 
 
@@ -485,9 +482,9 @@ for ϵ_greedy in ϵ_sweep
                                             g = discounted_reward(history)
                                             R = map(h->h.r, history)
                                             G = BetaZero.compute_returns(R; γ=discount(pomdp))
-                                            accuracy = accuracy_func(pomdp, history[1].b, history[1].s, vcat(map(h->h.s, history), history[end].sp), map(h->h.a, history), G)
+                                            acc = accuracy(pomdp, history[1].b, history[1].s, vcat(map(h->h.s, history), history[end].sp), map(h->h.a, history), G)
                                             put!(channel, true) # trigger progress bar update
-                                            g, accuracy
+                                            g, acc
                                         end, 1:n_runs)
                                         returns = vcat([r[1] for r in results]...)
                                         accuracies = vcat([r[2] for r in results]...)

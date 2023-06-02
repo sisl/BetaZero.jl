@@ -333,8 +333,8 @@ function plot_metric(solver::BetaZeroSolver;
                      title=ylabel,
                      include_holdout=false,
                      include_data_gen=true,
-                     relative_to_optimal=true, # TODO: parameterize in solver
-                     apply_rolling_mean=false, # TODO: parameterize in solver
+                     relative_to_optimal=false, # TODO: Parameterize
+                     apply_rolling_mean=false, # TODO: Parameterize
                      apply_smoothing=true, # TODO: Parameterize
                      ylim_accuracies=false,
                      expert_results=nothing, # [mean, std]
@@ -460,7 +460,7 @@ plot_returns(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:re
 function plot_accuracy_and_returns(solver::BetaZeroSolver; expert_accuracy=solver.expert_results.expert_accuracy, expert_returns=solver.expert_results.expert_returns, kwargs...)
     plt_accuracy = plot_accuracy(solver; expert_results=expert_accuracy, expert_label=solver.expert_results.expert_label, kwargs...)
     plt_returns = plot_returns(solver; expert_results=expert_returns, expert_label=solver.expert_results.expert_label, kwargs...)
-    return plot(plt_accuracy, plt_returns, layout=2, size=(1000,300), margin=5Plots.mm)
+    return plot(plt_accuracy, plt_returns, layout=2, size=(1000,300), margin=5Plots.mm, fontfamily="Computer Modern", framestyle=:box)
 end
 
 

@@ -6,8 +6,7 @@ using Tiger
 pomdp = TigerPOMDP()
 up = updater(pomdp)
 
-# TODO: BetaZero.accuracy(::TigerPOMDP)
-function tiger_accuracy_func(pomdp::TigerPOMDP, b0, s0, states, actions, returns)
+function BetaZero.accuracy(pomdp::TigerPOMDP, b0, s0, states, actions, returns)
 	return (states[end-1] == Tiger.left && actions[end] == Tiger.open_right) ||
 		   (states[end-1] == Tiger.right && actions[end] == Tiger.open_left)
 end

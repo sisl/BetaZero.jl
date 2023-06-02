@@ -6,8 +6,7 @@ using CryingBaby
 pomdp = CryingBabyPOMDP()
 up = updater(pomdp)
 
-# TODO: BetaZero.accuracy(::CryingBabyPOMDP)
-function cryingbaby_accuracy_func(pomdp::CryingBabyPOMDP, b0, s0, states, actions, returns)
+function BetaZero.accuracy(pomdp::CryingBabyPOMDP, b0, s0, states, actions, returns)
     accs = []
     for (s,a) in zip(states, actions)
         if s == CryingBaby.hungry

@@ -10,8 +10,7 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         verbose=true,
                         save_plots=true,
                         plot_incremental_data_gen=true,
-                        plot_incremental_holdout=true,
-                        accuracy_func=rocksample_accuracy_func)
+                        plot_incremental_holdout=true)
 
 # Neural network
 solver.nn_params.training_epochs = 10

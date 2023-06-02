@@ -74,6 +74,8 @@ Parameters for neural network surrogate model.
     plot_validation_bias_filename::String = "validation_data.png" # Filename the bias plots for validation model vs. data
 end
 
+BetaZeroNetworkParameters(pomdp::POMDP, up::Updater; kwargs...) = BetaZeroNetworkParameters(; input_size=get_input_size(pomdp,up), action_size=length(actions(pomdp)), kwargs...)
+
 
 """
 Parameters for Gaussian procces surrogate model.

@@ -3,7 +3,8 @@ Light-weight package to launch jobs across computers and sync code.
 """
 module RemoteJobs
 
-using Distributed
+using Reexport
+@reexport using Distributed
 export launch_remote_workers, sync_code
 
 

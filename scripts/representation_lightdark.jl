@@ -53,7 +53,7 @@ end
 
 # BetaZero.optimal_return(pomdp::LightDarkPOMDP, s) = pomdp.correct_r
 
-lightdark_accuracy_func(pomdp, b0, s0, states, actions, returns) = returns[end] == pomdp.correct_r
+BetaZero.accuracy(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = returns[end] == pomdp.correct_r
 lightdark_belief_reward(pomdp, b, a, bp) = mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))
 
 POMDPs.convert_s(::Type{A}, b::ParticleHistoryBelief{LightDarkState}, m::BeliefMDP) where A<:AbstractArray = eltype(A)[BetaZero.input_representation(b)...]

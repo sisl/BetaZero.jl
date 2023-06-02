@@ -9,8 +9,10 @@ using Reexport
 @reexport using GaussianProcesses
 @reexport using MCTS
 @reexport using Plots; default(fontfamily="Computer Modern", framestyle=:box)
+@reexport using ParticleFilters
 @reexport using POMDPs
 @reexport using Random
+@reexport using StatsBase
 using Distributions
 using Distributed
 using Metalhead
@@ -21,15 +23,13 @@ using Parameters
 using POMDPTools
 using ProgressMeter
 using Statistics
-using StatsBase
 using Suppressor
 using UnicodePlots
 import Flux.Zygote: ignore_derivatives
 
 
 include("belief_mdp.jl")
-include("representation.jl")
-include("optimal_return.jl")
+include("interface.jl")
 include("onestep_lookahead.jl")
 include("bias.jl")
 include("parameters.jl")
@@ -85,7 +85,7 @@ export
     data_buffer_train::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for training (Note: Each simulation has multiple time steps of data)
     data_buffer_valid::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for validation (Note: Making sure to clearly separate training from validation to prevent data leakage)
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
-    belief_reward::Function = (pomdp::POMDP, b, a, bp)->0.0 # reward function: R(b,a,b′)
+    belief_reward::Function = (pomdp::POMDP, b, a, bp)->mean(reward(pomdp, s, a) for s in particles(b)) # reward function: R(b,a,b′)
     include_info::Bool = false # Include `action_info` in metrics when running POMDP simulation
     mcts_solver::AbstractMCTSSolver = PUCTSolver(n_iterations=100,
                                                 check_repeat_action=true,
@@ -104,10 +104,9 @@ export
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
     performance_metrics::Array = [] # Stored metrics for data generation runs.
     holdout_metrics::Array = [] # Metrics computed from holdout test set.
-    accuracy_func::Function = (pomdp,b0,s0,states,action,returns)->nothing # (returns Bool): Function to indicate that the decision was "correct" (if applicable)
     plot_incremental_data_gen::Bool = false # Plot accuracies and returns over iterations after data collection
     plot_incremental_holdout::Bool = false # Plot accuracies and returns over iterations after running holdout test
-    display_plots::Bool = false # Display metrics plots after data collection
+    display_plots::Bool = plot_incremental_data_gen || plot_incremental_holdout # Display metrics plots after data collection
     save_plots::Bool = false # Save metrics plots after data collection
     plot_metrics_filename::String = "intermediate_metrics_figure.png"
     expert_results::NamedTuple{(:expert_accuracy, :expert_returns, :expert_label), Tuple{Union{Nothing,Vector}, Union{Nothing,Vector}, String}} = (expert_accuracy=nothing, expert_returns=nothing, expert_label="expert") # For plotting comparisons, pass in the [mean, stderr] for the expert metrics.
@@ -390,7 +389,6 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     end
 
     collect_metrics = solver.collect_metrics
-    accuracy_func = solver.accuracy_func
     include_info = solver.include_info
     max_steps = solver.params.max_steps
     final_criterion = mcts_solver.final_criterion
@@ -414,7 +412,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         ds0 = initialstate_distribution(pomdp)
         s0 = rand(ds0)
         b0 = initialize_belief(up, ds0)
-        data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, accuracy_func, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel, nn_params)
+        data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel, nn_params)
         if ismissing(data) && ismissing(metrics)
             # ignore missing data
             B = Z = Π = metrics = discounted_return = missing
@@ -531,7 +529,6 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                         max_steps=100,
                         ϵ=1e-8, # for policy vector
                         collect_metrics::Bool=false,
-                        accuracy_func::Function=(args...)->nothing,
                         include_info::Bool=false,
                         show_time::Bool=false,
                         final_criterion::Any=MaxQN(),
@@ -686,7 +683,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         for (t,d) in enumerate(data)
             d.z = G[t]
         end
-        metrics = collect_metrics ? compute_performance_metrics(pomdp, data, accuracy_func, b0, s0, beliefs, states, actions, real_returns, infos, T) : nothing
+        metrics = collect_metrics ? compute_performance_metrics(pomdp, data, b0, s0, beliefs, states, actions, real_returns, infos, T) : nothing
         return data, metrics
     end
 end
@@ -694,16 +691,16 @@ end
 
 """
 Method to collect performance and validation metrics during BetaZero policy iteration.
-Note, user defines `solver.accuracy_func` to determine the accuracy of the final decision (if applicable).
+Note, user defines `BetaZero.accuracy` to determine the accuracy of the final decision (if applicable).
 """
-function compute_performance_metrics(pomdp::POMDP, data, accuracy_func::Function, b0, s0, beliefs, states, actions, returns, infos, T)
+function compute_performance_metrics(pomdp::POMDP, data, b0, s0, beliefs, states, actions, returns, infos, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
     predicted_returns = [d.z for d in data]
     discounted_return = returns[1]
-    optimal_G = optimal_return(pomdp, s0) # User defined per-POMDP
-    accuracy = accuracy_func(pomdp, b0, s0, states, actions, returns) # Note: Problem specific, provide function to compute this.
+    optimal_G = BetaZero.optimal_return(pomdp, s0) # User defined per-POMDP
+    accuracy = BetaZero.accuracy(pomdp, b0, s0, states, actions, returns) # Note: Problem specific, provide function to compute this.
     return (discounted_return=discounted_return, accuracy=accuracy, optimal_return=optimal_G, num_actions=T, infos=infos, beliefs=beliefs, actions=actions, predicted_returns=predicted_returns)
 end
 
