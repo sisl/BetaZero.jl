@@ -160,11 +160,11 @@ Install supporting example POMDP models, the `RemoteJobs` package, and the `Part
 function install_extras()
     @info "Installing POMDP models and tools..."
     packages = [
-        PackageSpec(url=joinpath(@__DIR__, "submodules", "LightDark")),
+        PackageSpec(url=joinpath(@__DIR__, "..", "submodules", "LightDark")),
         PackageSpec(url="https://github.com/sisl/MineralExploration"),
-        PackageSpec(url=joinpath(@__DIR__, "submodules", "MinEx")),
-        PackageSpec(url=joinpath(@__DIR__, "submodules", "RemoteJobs")),
-        PackageSpec(url=joinpath(@__DIR__, "submodules", "ParticleBeliefs")),
+        PackageSpec(url=joinpath(@__DIR__, "..", "submodules", "MinEx")),
+        PackageSpec(url=joinpath(@__DIR__, "..", "submodules", "RemoteJobs")),
+        PackageSpec(url=joinpath(@__DIR__, "..", "submodules", "ParticleBeliefs")),
     ]
 
     # Run dev altogether
