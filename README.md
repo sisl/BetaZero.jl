@@ -12,6 +12,8 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
 To install the BetaZero solver, run:
 
 ```bash
+git clone https://github.com/sisl/BetaZero.jl
+cd BetaZero.jl
 julia install.jl
 ```
 
