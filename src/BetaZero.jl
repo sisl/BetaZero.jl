@@ -48,6 +48,8 @@ export
     RawValueNetworkPolicy,
     initialize_network,
     calc_loss_weight,
+    value_plot,
+    policy_plot,
     value_and_policy_plot,
     value_policy_uncertainty_plot,
     uncertainty_plot,
