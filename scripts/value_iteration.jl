@@ -18,18 +18,21 @@ discrete_grid = RectangleGrid(range(min_mean, stop=max_mean, length=discrete_len
                               range(min_sigma, stop=max_sigma, length=discrete_length))
 
 if RESOLVE
-	interpolation = LocalGIFunctionApproximator(discrete_grid)
-	vi_solver = LocalApproximationValueIterationSolver(interpolation,
-													max_iterations=25,
-													is_mdp_generative=true,
-													verbose=true,
-													n_generative_samples=100) # 10
-	bmdp = BeliefMDP(pomdp, up, lightdark_belief_reward)
-	@time lavi_policy = solve(vi_solver, bmdp)
-	BSON.@save "policy_lavi_ld10.bson" lavi_policy
-	@info "Running statistics..."
-	n_sims = 100
-	@show mean_and_stderr(simulate(RolloutSimulator(max_steps=100), bmdp, lavi_policy) for _ in 1:n_sims)
+	timing_results = @elapsed begin
+		interpolation = LocalGIFunctionApproximator(discrete_grid)
+		vi_solver = LocalApproximationValueIterationSolver(interpolation,
+														max_iterations=25,
+														is_mdp_generative=true,
+														verbose=true,
+														n_generative_samples=100) # 10
+		bmdp = BeliefMDP(pomdp, up, lightdark_belief_reward)
+		@time lavi_policy = solve(vi_solver, bmdp)
+		BSON.@save "policy_lavi_ld10_timing.bson" lavi_policy
+		@info "Running statistics..."
+		n_sims = 100
+		@show mean_and_stderr(simulate(RolloutSimulator(max_steps=100), bmdp, lavi_policy) for _ in 1:n_sims)
+	end
+	@info timing_results
 end
 
 

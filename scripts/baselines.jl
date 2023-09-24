@@ -12,7 +12,7 @@ using RockSample
 using MinEx
 
 ENV["LAUNCH_PARALLEL"] = false
-TestPOMDPType = MinExPOMDP
+TestPOMDPType = LightDark
 @info TestPOMDPType
 
 if TestPOMDPType == LightDarkPOMDP
@@ -62,78 +62,81 @@ end
     end
 
     function solve_pomcpow(pomdp, n_iterations; tree_in_info=false, override=false, use_heuristics=true)
-        if pomdp isa LightDarkPOMDP
-            # From: https://github.com/LAMDA-POMDP/Test/
-            if use_heuristics
-                interp = LocalGIFunctionApproximator(RectangleGrid(range(-1, stop=1, length=3), range(-100, stop=100, length=401)))
-                approx_mdp = solve(LocalApproximationValueIterationSolver(
-                    interp,
-                    verbose=true,
-                    max_iterations=1000,
-                    is_mdp_generative=true,
-                    n_generative_samples=1000),
-                    pomdp)
-                value_estimator = FOValue(approx_mdp)
-            else
-                @warn "Not using POMCPOW heuristics"
-                value_estimator = RolloutEstimator(RandomSolver())
-            end
-            if override
-                @warn "Overriding POMCPOW iterations"
-                n_iterations = 100_000 # From AdaOPS paper.
-            end
-            pomcpow_solver = POMCPOWSolver(;
+        timing_results = @elapsed begin
+            if pomdp isa LightDarkPOMDP
+                # From: https://github.com/LAMDA-POMDP/Test/
+                if use_heuristics
+                    interp = LocalGIFunctionApproximator(RectangleGrid(range(-1, stop=1, length=3), range(-100, stop=100, length=401)))
+                    approx_mdp = solve(LocalApproximationValueIterationSolver(
+                        interp,
+                        verbose=true,
+                        max_iterations=1000,
+                        is_mdp_generative=true,
+                        n_generative_samples=1000),
+                        pomdp)
+                    value_estimator = FOValue(approx_mdp)
+                else
+                    @warn "Not using POMCPOW heuristics"
+                    value_estimator = AdaOPS.RolloutEstimator(RandomSolver())
+                end
+                if override
+                    @warn "Overriding POMCPOW iterations"
+                    n_iterations = 100_000 # From AdaOPS paper.
+                end
+                pomcpow_solver = POMCPOWSolver(;
+                    tree_queries=n_iterations,
+                    estimate_value=value_estimator,
+                    max_time=1.0,
+                    criterion=MaxUCB(10.0),
+                    max_depth=20,
+                    k_observation=4.0,
+                    alpha_observation=0.03,
+                )
+            elseif pomdp isa RockSamplePOMDP
+                if use_heuristics
+                    move_east = RSExitSolver()
+                    value_estimator = FOValue(move_east)
+                else
+                    @warn "Not using POMCPOW heuristics"
+                    value_estimator = AdaOPS.RolloutEstimator(RandomSolver())
+                end
+                if override
+                    @warn "Overriding POMCPOW iterations"
+                    n_iterations = 200_000
+                end
+                pomcpow_solver = POMCPOWSolver(;
                 tree_queries=n_iterations,
-                estimate_value=value_estimator,
-                max_time=1.0,
-                criterion=MaxUCB(10.0),
-                max_depth=20,
-                k_observation=4.0,
-                alpha_observation=0.03,
-            )
-        elseif pomdp isa RockSamplePOMDP
-            if use_heuristics
-                move_east = RSExitSolver()
-                value_estimator = FOValue(move_east)
-            else
-                @warn "Not using POMCPOW heuristics"
-                value_estimator = RolloutEstimator(RandomSolver())
+                    estimate_value=value_estimator,
+                    max_time=1.0,
+                    enable_action_pw=false,
+                    criterion=MaxUCB(10.0),
+                    k_observation=1.0,
+                    alpha_observation=1.0,
+                )
+            elseif pomdp isa MinExPOMDP
+                if use_heuristics
+                    value_estimator = (pomdp, s, h, steps) -> isterminal(pomdp, s) ? 0 : max(0, MinEx.extraction_reward(pomdp, s))
+                else
+                    @warn "Not using POMCPOW heuristics"
+                    value_estimator = AdaOPS.RolloutEstimator(RandomSolver())
+                end
+                if override
+                    @warn "Overriding POMCPOW iterations"
+                    n_iterations = 100_000
+                end
+                pomcpow_solver = POMCPOWSolver(tree_queries=n_iterations,
+                    criterion=POMCPOW.MaxUCB(100.0),
+                    k_action=4.0,
+                    alpha_action=0.5,
+                    k_observation=2.0,
+                    alpha_observation=0.25,
+                    estimate_value=value_estimator,
+                    tree_in_info=tree_in_info,
+                )
             end
-            if override
-                @warn "Overriding POMCPOW iterations"
-                n_iterations = 200_000
-            end
-            pomcpow_solver = POMCPOWSolver(;
-            tree_queries=n_iterations,
-                estimate_value=value_estimator,
-                max_time=1.0,
-                enable_action_pw=false,
-                criterion=MaxUCB(10.0),
-                k_observation=1.0,
-                alpha_observation=1.0,
-            )
-        elseif pomdp isa MinExPOMDP
-            if use_heuristics
-                value_estimator = (pomdp, s, h, steps) -> isterminal(pomdp, s) ? 0 : max(0, MinEx.extraction_reward(pomdp, s))
-            else
-                @warn "Not using POMCPOW heuristics"
-                value_estimator = RolloutEstimator(RandomSolver())
-            end
-            if override
-                @warn "Overriding POMCPOW iterations"
-                n_iterations = 100_000
-            end
-            pomcpow_solver = POMCPOWSolver(tree_queries=n_iterations,
-                criterion=POMCPOW.MaxUCB(100.0),
-                k_action=4.0,
-                alpha_action=0.5,
-                k_observation=2.0,
-                alpha_observation=0.25,
-                estimate_value=value_estimator,
-                tree_in_info=tree_in_info,
-            )
+            pomcpow_planner = solve(pomcpow_solver, pomdp)
         end
-        pomcpow_planner = solve(pomcpow_solver, pomdp)
+        @info timing_results
         return pomcpow_planner
     end
 
@@ -229,120 +232,126 @@ end
     POMDPs.value(p::AlphaVectorPolicy, s::RSState) = value(p, ParticleCollection([s])) # Bug in https://github.com/LAMDA-POMDP/Test/blob/0f1aefec579a59242060fad9e74683bdaa3b3208/test/RSTest.jl#L10
     AdaOPS.pdf(::Union{Nothing,Float32}, ::Union{Nothing,Float32}) = 1.0 # weight for MinEx nothing or -Inf32 observation
 
-    function solve_adaops(pomdp; use_mdp_solution=false, use_fixed_bounds=false)
-        # From: https://github.com/LAMDA-POMDP/Test/
-        if pomdp isa LightDarkPOMDP
-            if use_fixed_bounds
-                @warn "Using fixed bound in AdaOPS for LightDark."
-                bds = AdaOPS.IndependentBounds(pomdp.incorrect_r, pomdp.correct_r, check_terminal=true)
-                adaops_solver = AdaOPSSolver(bounds=bds,
-                                    m_min=10,
-                                    delta=1.0,
-                                    rng=Random.GLOBAL_RNG,
-                                    tree_in_info=false)
-            else
-                interp = LocalGIFunctionApproximator(RectangleGrid(range(-1, stop=1, length=3), range(-100, stop=100, length=401)))
-                approx_mdp = solve(LocalApproximationValueIterationSolver(
-                    interp,
-                    verbose=true,
-                    max_iterations=1000,
-                    is_mdp_generative=true,
-                    n_generative_samples=1000),
-                    pomdp)
-                approx_random = solve(LocalApproximationRandomSolver(
-                    interp,
-                    verbose=true,
-                    max_iterations=1000,
-                    is_mdp_generative=true,
-                    n_generative_samples=1000),
-                    pomdp)
-                grid = StateGrid(range(-10, stop=15, length=26))
-                bds = AdaOPS.IndependentBounds(FOValue(approx_random), FOValue(approx_mdp), check_terminal=true)
-                adaops_solver = AdaOPSSolver(bounds=bds,
-                                    grid=grid,
-                                    m_min=10,
-                                    delta=1.0,
-                                    rng=Random.GLOBAL_RNG,
-                                    tree_in_info=false)
-            end
-        elseif pomdp isa RockSamplePOMDP
-            move_east = RSExitSolver()
-            if use_fixed_bounds
-                @warn "Using fixed bound in AdaOPS for RockSample."
-                n = pomdp.map_size[1]
-                k = length(pomdp.rocks_positions)
-                upper_bnd_fixed = sum(discount(pomdp)^(t-1)*pomdp.good_rock_reward for t in (1+n-k):(2k-n)) + pomdp.exit_reward
-                bds = AdaOPS.IndependentBounds(FOValue(move_east), upper_bnd_fixed, check_terminal=true, consistency_fix_thresh=1e-5)
-            else
-                if use_mdp_solution
-                    @warn "Using MDP solution in AdaOPS for RockSample."
-                    upper_bnd_solver = RSMDPSolver()
+    function solve_adaops(pomdp; use_rocksample_mdp_solution=false, use_fixed_bounds=false)
+        timing_results = @elapsed begin
+            # From: https://github.com/LAMDA-POMDP/Test/
+            if pomdp isa LightDarkPOMDP
+                if use_fixed_bounds
+                    @warn "Using fixed bound in AdaOPS for LightDark."
+                    bds = AdaOPS.IndependentBounds(pomdp.incorrect_r, pomdp.correct_r, check_terminal=true)
+                    adaops_solver = AdaOPSSolver(bounds=bds,
+                                        m_min=10,
+                                        delta=1.0,
+                                        rng=Random.GLOBAL_RNG,
+                                        tree_in_info=false)
                 else
-                    upper_bnd_solver = RSQMDPSolver()
+                    interp = LocalGIFunctionApproximator(RectangleGrid(range(-1, stop=1, length=3), range(-100, stop=100, length=401)))
+                    approx_mdp = solve(LocalApproximationValueIterationSolver(
+                        interp,
+                        verbose=true,
+                        max_iterations=1000,
+                        is_mdp_generative=true,
+                        n_generative_samples=1000),
+                        pomdp)
+                    approx_random = solve(LocalApproximationRandomSolver(
+                        interp,
+                        verbose=true,
+                        max_iterations=1000,
+                        is_mdp_generative=true,
+                        n_generative_samples=1000),
+                        pomdp)
+                    grid = StateGrid(range(-10, stop=15, length=26))
+                    bds = AdaOPS.IndependentBounds(FOValue(approx_random), FOValue(approx_mdp), check_terminal=true)
+                    adaops_solver = AdaOPSSolver(bounds=bds,
+                                        grid=grid,
+                                        m_min=10,
+                                        delta=1.0,
+                                        rng=Random.GLOBAL_RNG,
+                                        tree_in_info=false)
                 end
-                bds = AdaOPS.IndependentBounds(FOValue(move_east), POValue(upper_bnd_solver), check_terminal=true, consistency_fix_thresh=1e-5)
+            elseif pomdp isa RockSamplePOMDP
+                move_east = RSExitSolver()
+                if use_fixed_bounds
+                    @warn "Using fixed bound in AdaOPS for RockSample."
+                    n = pomdp.map_size[1]
+                    k = length(pomdp.rocks_positions)
+                    upper_bnd_fixed = sum(discount(pomdp)^(t-1)*pomdp.good_rock_reward for t in (1+n-k):(2k-n)) + pomdp.exit_reward
+                    bds = AdaOPS.IndependentBounds(FOValue(move_east), upper_bnd_fixed, check_terminal=true, consistency_fix_thresh=1e-5)
+                else
+                    if use_rocksample_mdp_solution
+                        @warn "Using MDP solution in AdaOPS for RockSample."
+                        upper_bnd_solver = RSMDPSolver()
+                    else
+                        upper_bnd_solver = RSQMDPSolver()
+                    end
+                    bds = AdaOPS.IndependentBounds(FOValue(move_east), POValue(upper_bnd_solver), check_terminal=true, consistency_fix_thresh=1e-5)
+                end
+                adaops_solver = AdaOPSSolver(bounds=bds,
+                                    m_min=100,
+                                    delta=0.1,
+                                    timeout_warning_threshold=Inf,
+                                    tree_in_info=false)
+            elseif pomdp isa MinExPOMDP
+                minex_lb = compute_lowerbound_return_minex(pomdp)
+                minex_up = compute_optimal_return_minex(pomdp, initialstate(pomdp))[1] # mean of optimal return
+                bds = AdaOPS.IndependentBounds(minex_lb, minex_up, check_terminal=true, consistency_fix_thresh=1e-5)
+                bds = init_param(pomdp, bds)
+                adaops_solver = AdaOPSSolver(bounds=bds,
+                                    m_min=500,
+                                    delta=0.1,
+                                    timeout_warning_threshold=Inf,
+                                    tree_in_info=false)
+            else
+                error("No AdaOPS planner for $(typeof(pomdp))")
             end
-            adaops_solver = AdaOPSSolver(bounds=bds,
-                                m_min=100,
-                                delta=0.1,
-                                timeout_warning_threshold=Inf,
-                                tree_in_info=false)
-        elseif pomdp isa MinExPOMDP
-            minex_lb = compute_lowerbound_return_minex(pomdp)
-            minex_up = compute_optimal_return_minex(pomdp, initialstate(pomdp))[1] # mean of optimal return
-            bds = AdaOPS.IndependentBounds(minex_lb, minex_up, check_terminal=true, consistency_fix_thresh=1e-5)
-            bds = init_param(pomdp, bds)
-            adaops_solver = AdaOPSSolver(bounds=bds,
-                                m_min=500,
-                                delta=0.1,
-                                timeout_warning_threshold=Inf,
-                                tree_in_info=false)
-        else
-            error("No AdaOPS planner for $(typeof(pomdp))")
+            adaops_planner = solve(adaops_solver, pomdp)
         end
-        adaops_planner = solve(adaops_solver, pomdp)
+        @info timing_results
         return adaops_planner
     end
 
-    function solve_despot(pomdp; use_mdp_solution=false, use_fixed_bounds=false)
-        if pomdp isa LightDarkPOMDP
-            random = solve(RandomSolver(), pomdp)
-            if use_fixed_bounds
-                @warn "Using fixed bound in DESPOT for LightDark."
-                bds = ARDESPOT.IndependentBounds(pomdp.incorrect_r, pomdp.correct_r, check_terminal=true)
-                despot_solver = DESPOTSolver(; lambda=0.1, K=30, bounds=bds, bounds_warnings=false)
-            else
-                bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(random), pomdp.correct_r, check_terminal=true)
-                despot_solver = DESPOTSolver(; default_action=random, lambda=0.1, K=30, bounds=bds, bounds_warnings=false)
-            end
-        elseif pomdp isa RockSamplePOMDP
-            move_east = RSExitSolver()
-            if use_fixed_bounds
-                @warn "Using fixed bound in DESPOT for RockSample."
-                n = pomdp.map_size[1]
-                k = length(pomdp.rocks_positions)
-                upper_bnd_fixed = sum(discount(pomdp)^(t-1)*pomdp.good_rock_reward for t in (1+n-k):(2k-n)) + pomdp.exit_reward
-                bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(move_east), upper_bnd_fixed, check_terminal=true, consistency_fix_thresh=1e-5)
-            else
-                if use_mdp_solution
-                    @warn "Using MDP solution in DESPOT for RockSample."
-                    upper_bnd_solver = RSMDPSolver()
+    function solve_despot(pomdp; use_rocksample_mdp_solution=false, use_fixed_bounds=false)
+        timing_results = @elapsed begin
+            if pomdp isa LightDarkPOMDP
+                random = solve(RandomSolver(), pomdp)
+                if use_fixed_bounds
+                    @warn "Using fixed bound in DESPOT for LightDark."
+                    bds = ARDESPOT.IndependentBounds(pomdp.incorrect_r, pomdp.correct_r, check_terminal=true)
+                    despot_solver = DESPOTSolver(; lambda=0.1, K=30, bounds=bds, bounds_warnings=false)
                 else
-                    upper_bnd_solver = RSQMDPSolver()
+                    bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(random), pomdp.correct_r, check_terminal=true)
+                    despot_solver = DESPOTSolver(; default_action=random, lambda=0.1, K=30, bounds=bds, bounds_warnings=false)
                 end
-                bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(move_east), ARDESPOT.FullyObservableValueUB(upper_bnd_solver), check_terminal=true, consistency_fix_thresh=1e-5)
+            elseif pomdp isa RockSamplePOMDP
+                move_east = RSExitSolver()
+                if use_fixed_bounds
+                    @warn "Using fixed bound in DESPOT for RockSample."
+                    n = pomdp.map_size[1]
+                    k = length(pomdp.rocks_positions)
+                    upper_bnd_fixed = sum(discount(pomdp)^(t-1)*pomdp.good_rock_reward for t in (1+n-k):(2k-n)) + pomdp.exit_reward
+                    bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(move_east), upper_bnd_fixed, check_terminal=true, consistency_fix_thresh=1e-5)
+                else
+                    if use_rocksample_mdp_solution
+                        @warn "Using MDP solution in DESPOT for RockSample."
+                        upper_bnd_solver = RSMDPSolver()
+                    else
+                        upper_bnd_solver = RSQMDPSolver()
+                    end
+                    bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(move_east), ARDESPOT.FullyObservableValueUB(upper_bnd_solver), check_terminal=true, consistency_fix_thresh=1e-5)
+                end
+                despot_solver = DESPOTSolver(; default_action=move_east, lambda=0.0, K=100, bounds=bds)
+            elseif pomdp isa MinExPOMDP
+                random = solve(RandomSolver(), pomdp)
+                minex_lb = compute_lowerbound_return_minex(pomdp)
+                minex_up = compute_optimal_return_minex(pomdp, initialstate(pomdp))[1] # mean of optimal return
+                bds = ARDESPOT.IndependentBounds(minex_lb, minex_up, check_terminal=true, consistency_fix_thresh=1e-5)
+                despot_solver = DESPOTSolver(; default_action=random, lambda=0.0, K=100, bounds=bds)
+            else
+                error("No DESPOT planner for $(typeof(pomdp))")
             end
-            despot_solver = DESPOTSolver(; default_action=move_east, lambda=0.0, K=100, bounds=bds)
-        elseif pomdp isa MinExPOMDP
-            random = solve(RandomSolver(), pomdp)
-            minex_lb = compute_lowerbound_return_minex(pomdp)
-            minex_up = compute_optimal_return_minex(pomdp, initialstate(pomdp))[1] # mean of optimal return
-            bds = ARDESPOT.IndependentBounds(minex_lb, minex_up, check_terminal=true, consistency_fix_thresh=1e-5)
-            despot_solver = DESPOTSolver(; default_action=random, lambda=0.0, K=100, bounds=bds)
-        else
-            error("No DESPOT planner for $(typeof(pomdp))")
+            despot_planner = solve(despot_solver, pomdp)
         end
-        despot_planner = solve(despot_solver, pomdp)
+        @info timing_results
         return despot_planner
     end
 end
@@ -360,6 +369,7 @@ alphaS_sweep = [nothing]
 kA_sweep = [nothing]
 alphaA_sweep = [nothing]
 skip_z_equal = true
+run_with_heuristics = false
 
 ϵ_results = Dict()
 z_results = Dict()
@@ -419,21 +429,19 @@ for ϵ_greedy in ϵ_sweep
                                 Random.seed!(0xC0FFEE)
                                 Random.seed!(rand(1:typemax(UInt32))) # To ensure we mix it up (still deterministic based on previous `seed!` call)
 
-                                run_with_heuristics = false
-
                                 policies = Dict(
                                     "BetaZero"=>bz_policy,
                                     # "BetaZero (ensemble)"=>en_policy,
                                     # "Random"=>RandomPolicy(pomdp),
                                     # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
                                     # "MCTS (rand. values)"=>extract_mcts_rand_values(bz_solver, pomdp),
-                                    # "POMCPOW"=>solve_pomcpow(pomdp, pomcpow_iteration_factor*n_iterations, override=true, use_heuristics=run_with_heuristics), # Note override for table comparison.
                                     # "LAVI"=>lavi_policy,
                                     # "MCTS + LAVI"=>mcts_lavi(bz_policy.planner, lavi_policy),
                                     # "Raw Network [policy]"=>RawNetworkPolicy(pomdp, bz_policy.surrogate),
                                     # "Raw Network [value]"=>RawValueNetworkPolicy(bz_solver.bmdp, bz_policy.surrogate, 5), # NOTE: `n_obs`
-                                    # "AdaOPS"=>solve_adaops(pomdp; use_mdp_solution=false, use_fixed_bounds=!run_with_heuristics), # Note fixed bound for RS(25,25)
-                                    # "DESPOT"=>solve_despot(pomdp; use_mdp_solution=false, use_fixed_bounds=!run_with_heuristics), # Note fixed bound for RS(25,25)
+                                    # "POMCPOW"=>solve_pomcpow(pomdp, pomcpow_iteration_factor*n_iterations, override=true, use_heuristics=run_with_heuristics), # Note override for table comparison.
+                                    # "AdaOPS"=>solve_adaops(pomdp; use_rocksample_mdp_solution=false, use_fixed_bounds=!run_with_heuristics), # Note use fixed bound for RS(25,25)
+                                    # "DESPOT"=>solve_despot(pomdp; use_rocksample_mdp_solution=false, use_fixed_bounds=!run_with_heuristics), # Note use fixed bound for RS(25,25)
                                 )
 
                                 latex_table = Dict()
@@ -535,3 +543,5 @@ function plot_epsilon_sweep(ϵ_results)
     end
     return plot!()
 end
+
+nothing # REPL

@@ -75,7 +75,8 @@ export
     policy_lookup,
     dirichlet_noise,
     bootstrap,
-    install_extras
+    install_extras,
+    accuracy
 
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
