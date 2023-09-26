@@ -25,19 +25,24 @@ function POMDPTools.render(pomdp::LightDarkPOMDP, step;
         show_belief=true,
         show_belief_traj=true,
         show_obs=true,
+        show_goal=true,
         traj_color=:red,
         traj_label="trajectory",
         traj_alpha=0.5,
         traj_lw=2,
+        mark_color=:black,
         goal_label="goal",
-        goal_color=:gold,
-        goal_ls=:solid,
+        goal_color=:white,
+        goal_bound_color=:gray,
+        goal_ls=:dash,
+        goal_bound_ls=:dash,
+        goal_lw=1,
         hold=false,
         show_correct=true,
         shared_xmax=nothing,
         colorbar=true,
         use_pgf=false,
-        )
+    )
     S = [steps[1].s]
     A = [0.0]
     O = [0.0]
@@ -85,7 +90,6 @@ function POMDPTools.render(pomdp::LightDarkPOMDP, step;
     if draw_light_region
         plt_lightdark = plotf(xlims=(1, xmax), ylims=(-ymax, ymax), size=(colorbar ? 600 : 550,250), legend=:bottomright, xlabel="time", ylabel="state")
         heatmap!(1:xmax, range(-ymax, ymax, length=50), (x,y)->sqrt(std(observation(pomdp, LightDarkState(0, y)))), c=:grayC, colorbar=colorbar)
-        hline!([0], c=goal_color, ls=goal_ls, lw=1, label=goal_label)
     else
         plt_lightdark = plotf()
     end
@@ -93,11 +97,18 @@ function POMDPTools.render(pomdp::LightDarkPOMDP, step;
     show_belief && plot_beliefs(B; hold=true)
 
     plot!(eachindex(S), Y, c=traj_color, lw=traj_lw, label=use_pgf ? traj_label : false, alpha=traj_alpha)
+    scatter!(eachindex(S)[end:end], Y[end:end], c=traj_color, msc=mark_color, ms=3, msw=0.5, label=false, alpha=1.5*traj_alpha)
     # scatter!(eachindex(S), Y, c=traj_color, ms=2, msw=1, msc=:black, label=false, alpha=traj_alpha)
     !use_pgf && plot!([], [], c=traj_color, lw=traj_lw, label=traj_label) # for better legend
 
     show_belief_traj && plot!(eachindex(S), Ỹ, c=:blue, lw=1, ls=:dash, label="believed traj.", alpha=0.5)
     show_obs && scatter!(eachindex(S), O, ms=2, c=:cyan, msc=:black, label="observation")
+
+    if show_goal
+        hline!([1], c=goal_bound_color, ls=goal_bound_ls, lw=goal_lw, label=goal_label)
+        hline!([0], c=goal_color, ls=goal_ls, lw=goal_lw, label=goal_label)
+        hline!([-1], c=goal_bound_color, ls=goal_bound_ls, lw=goal_lw, label=goal_label)
+    end
 
     if isterminal(pomdp, S[end]) && show_correct
         iscorrect = R[end] == pomdp.correct_r
@@ -158,6 +169,9 @@ function plot_policy_trajectories(policy_simulations, names;
         # colors=["#35b778", "#fde725", "#482878"],
         # colors=["#fde725", "#35b778", "#482878"],
         colors=["#FDE725", "#21918C", "#440154"],
+        mark_colors=[:black, :black, :lightgray],
+        # mark_colors=["#290132", "#145754", "#290132"], # https://mdigi.tools/darken-color/ 40%
+        # mark_colors=["#fdec51", "#2dc7c0", "#8802a8"], # https://mdigi.tools/lighten-color/ 20%
         # colors=["#f5831a", "#00ff00", "#ee161f"],
         title=raw"Localization trajectories in \textsc{LightDark}$(10)$",
         use_pgf=false)
@@ -189,7 +203,7 @@ function plot_policy_trajectories(policy_simulations, names;
     draw_region = true
     for (i,simulations) in enumerate(policy_simulations)
         show_label = true
-        for steps in simulations
+        for (t,steps) in enumerate(simulations)
             render(pomdp, (; t=Inf);
                 steps,
                 draw_light_region=draw_region, # only draw background on first rendering
@@ -199,12 +213,12 @@ function plot_policy_trajectories(policy_simulations, names;
                 colorbar=false,
                 show_obs=false,
                 traj_color=colors[i],
+                mark_color=mark_colors[i],
                 traj_label=show_label ? names[i] : false,
                 traj_alpha=use_pgf ? 0.5 : 0.5,
                 traj_lw=2,
+                show_goal=(i == length(policy_simulations) && t == length(simulations)),
                 goal_label=false,
-                goal_color=:white,
-                goal_ls=:dot,
                 show_correct=false,
                 hold=true,
                 use_pgf=use_pgf,
