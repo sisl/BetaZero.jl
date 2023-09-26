@@ -505,7 +505,7 @@ network_lookup(policy::BetaZeroPolicy, belief) = network_lookup(policy.surrogate
 function network_lookup(f::Union{Chain,EnsembleNetwork}, belief)
     x = network_input(belief)
     y = cpu(f(x)) # evaluate network `f`
-    return y[1], y[2:end] # [v, p...]
+    return y[1], y[2:end] # [v, p...] NOTE: This ordering is differeent than the paper which defines (𝐩, v)
 end
 
 
