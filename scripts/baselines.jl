@@ -1,6 +1,6 @@
 using Distributed
 using Revise
-@everywhere LAUNCH_PARALLEL = true
+@everywhere LAUNCH_PARALLEL = false
 
 if LAUNCH_PARALLEL
     desired_procs = 20
@@ -12,7 +12,7 @@ using RockSample
 using MinEx
 
 ENV["LAUNCH_PARALLEL"] = false
-TestPOMDPType = LightDark
+TestPOMDPType = LightDarkPOMDP
 @info TestPOMDPType
 
 if TestPOMDPType == LightDarkPOMDP
@@ -409,8 +409,7 @@ for ϵ_greedy in ϵ_sweep
                                     @warn "Skipping zq=$zq and zn=$zn"
                                     continue
                                 end
-                                @info "Baselining $n_iterations online iterations (over $n_runs runs, with ϵ=$ϵ_greedy, and zq=$zq and zn=$zn, and k_state=$k_state alpha_state=$alpha_state, and k_action=$k_action alpha_action=$alpha_action)"
-                                if @isdefined(policy)
+                                if @isdefined(policy) && @isdefined(solver)
                                     bz_policy = adjust_policy(policy, n_iterations; ϵ_greedy, zq, zn, k_state, alpha_state, k_action, alpha_action)
                                     bz_solver = adjust_solver(solver, n_iterations; ϵ_greedy, zq, zn, k_state, alpha_state, k_action, alpha_action)
                                 end
@@ -429,8 +428,9 @@ for ϵ_greedy in ϵ_sweep
                                 Random.seed!(0xC0FFEE)
                                 Random.seed!(rand(1:typemax(UInt32))) # To ensure we mix it up (still deterministic based on previous `seed!` call)
 
+                                # NOTE: Uncomment the algorithms you want to test.
                                 policies = Dict(
-                                    "BetaZero"=>bz_policy,
+                                    # "BetaZero"=>bz_policy,
                                     # "BetaZero (ensemble)"=>en_policy,
                                     # "Random"=>RandomPolicy(pomdp),
                                     # "MCTS (zeroed values)"=>extract_mcts(bz_solver, pomdp),
@@ -447,6 +447,7 @@ for ϵ_greedy in ϵ_sweep
                                 latex_table = Dict()
                                 results_table = Dict()
                                 for (k,π) in policies
+                                    @info "Baselining $n_iterations online iterations (over $n_runs runs, with ϵ=$ϵ_greedy, and zq=$zq and zn=$zn, and k_state=$k_state alpha_state=$alpha_state, and k_action=$k_action alpha_action=$alpha_action)"
                                     if iteration_i > 1 && k ∈ ["AdaOPS", "DESPOT", "Raw Network [policy]", "Raw Network [value]", "Random", "LAVI"]
                                         @info "Skipping $k due to not using n_iterations online"
                                         continue
@@ -500,19 +501,21 @@ for ϵ_greedy in ϵ_sweep
                                     push!(online_results[k].Yerr, stderr_rd)
                                 end
 
-                                println("|", "—"^50, "|")
-                                for (k,v) in sort(latex_table, rev=true)
-                                    println(v)
-                                end
-                                println("—"^50)
-                                println("    \\item[*] {$n_iterations iterations ($n_runs runs each).}")
-                                println("|", "—"^50, "|")
-                                ϵ_results[ϵ_greedy][n_iterations] = results_table
+                                if !isempty(policies)
+                                    println("|", "—"^50, "|")
+                                    for (k,v) in sort(latex_table, rev=true)
+                                        println(v)
+                                    end
+                                    println("—"^50)
+                                    println("    \\item[*] {$n_iterations iterations ($n_runs runs each).}")
+                                    println("|", "—"^50, "|")
+                                    ϵ_results[ϵ_greedy][n_iterations] = results_table
 
-                                if haskey(results_table, "BetaZero")
-                                    z_results[(zq, zn)][n_iterations] = results_table["BetaZero"]
-                                    spw_results[(k_state, alpha_state)][n_iterations] = results_table["BetaZero"]
-                                    apw_results[(k_action, alpha_action)][n_iterations] = results_table["BetaZero"]
+                                    if haskey(results_table, "BetaZero")
+                                        z_results[(zq, zn)][n_iterations] = results_table["BetaZero"]
+                                        spw_results[(k_state, alpha_state)][n_iterations] = results_table["BetaZero"]
+                                        apw_results[(k_action, alpha_action)][n_iterations] = results_table["BetaZero"]
+                                    end
                                 end
                             end
                         end

@@ -1,6 +1,8 @@
+using Revise
 using BetaZero
 using LightDark
 using ParticleFilters
+using ParticleBeliefs
 using Plots; default(fontfamily="Computer Modern", framestyle=:box)
 using POMDPs
 using POMDPTools
@@ -11,6 +13,10 @@ using POMDPGifs
 using POMDPTools
 using ProgressMeter
 using Reel
+
+# backwards compat.
+lightdark_accuracy_func(pomdp, b0, s0, states, actions, returns) = returns[end] == pomdp.correct_r
+lightdark_belief_reward(pomdp, b, a, bp) = mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))
 
 function POMDPTools.render(pomdp::LightDarkPOMDP, step;
         steps=nothing,
@@ -87,6 +93,7 @@ function POMDPTools.render(pomdp::LightDarkPOMDP, step;
     show_belief && plot_beliefs(B; hold=true)
 
     plot!(eachindex(S), Y, c=traj_color, lw=traj_lw, label=use_pgf ? traj_label : false, alpha=traj_alpha)
+    # scatter!(eachindex(S), Y, c=traj_color, ms=2, msw=1, msc=:black, label=false, alpha=traj_alpha)
     !use_pgf && plot!([], [], c=traj_color, lw=traj_lw, label=traj_label) # for better legend
 
     show_belief_traj && plot!(eachindex(S), Ỹ, c=:blue, lw=1, ls=:dash, label="believed traj.", alpha=0.5)
@@ -140,9 +147,19 @@ function plot_policy_trajectories(policy_simulations, names;
         # [POMCPOW, AdaOPS, BetaZero]
         # colors=[seaborn_light_blue, :gold, seaborn_red],
         # colors=[seaborn_light_blue, :gold, seaborn_red],
-        colors=["#ffff00", "#00ffff", "#ff0000"],
+        # colors=["#ffff00", "#00ffff", "#ff0000"],
+        # colors=["#ffff00", "#00ff99", "#ff4400"],
+        # colors=["#FEDD5C", "#6FC3FF", "#E04F39"],
+        # colors=["#1AECBA", "#ffff00", "#ff0000"], # E50808
+        # colors=["#ffff00", "#ff0000", "#0088ff"],
+        # colors=["#FEDD5C", seaborn_red, "#00548f"],
+        # colors=["#FEDD5C", seaborn_red, "#25838e"],
+        # colors=["#fde725", seaborn_red, "#25838e"],
+        # colors=["#35b778", "#fde725", "#482878"],
+        # colors=["#fde725", "#35b778", "#482878"],
+        colors=["#FDE725", "#21918C", "#440154"],
         # colors=["#f5831a", "#00ff00", "#ee161f"],
-        title="Localization trajectories in \\sc LightDark(10)",
+        title=raw"Localization trajectories in \textsc{LightDark}$(10)$",
         use_pgf=false)
 
     if use_pgf
@@ -151,13 +168,14 @@ function plot_policy_trajectories(policy_simulations, names;
             grid=false,
             legend=:bottomright,
             legend_font_halign=:left,
-            titlefont=15, # 40÷2
-            legendfontsize=28÷3,
-            guidefontsize=28÷2,
-            tickfontsize=28÷2,
-            colorbartickfontsizes=28÷2,
+            titlefont=20, # 40÷2
+            legendfontsize=28÷2,
+            guidefontsize=28÷1.5,
+            tickfontsize=28÷1.5,
+            colorbartickfontsizes=28÷1.5,
             yticks=-10:10:10,
             left_margin=1Plots.mm,
+            fontfamily="Times",
         )
     else
         gr()
@@ -182,8 +200,8 @@ function plot_policy_trajectories(policy_simulations, names;
                 show_obs=false,
                 traj_color=colors[i],
                 traj_label=show_label ? names[i] : false,
-                traj_alpha=use_pgf ? 0.3 : 0.2,
-                traj_lw=1,
+                traj_alpha=use_pgf ? 0.5 : 0.5,
+                traj_lw=2,
                 goal_label=false,
                 goal_color=:white,
                 goal_ls=:dot,
@@ -195,7 +213,7 @@ function plot_policy_trajectories(policy_simulations, names;
             draw_region = false
         end
     end
-    return plot!(size=(850,250))
+    return plot!(size=(700,250))
 end
 
 

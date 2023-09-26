@@ -162,3 +162,34 @@ function load_incremental(filename::String)
 
     return (; network, parameters)
 end
+
+
+"""
+For backwards compatability with policies saved before commit c0cff08 on June 1, 2023.
+(i.e., input `accuracy_func` was replaced with `BetaZero.accuracy` interface function).
+"""
+function BSON.newstruct!(::BetaZeroSolver, args...)
+    if length(args) > 23
+        fields = []
+        i = 1
+        for arg in args
+            # NOTE: Skip 17th argument which was `accuracy_func` and was replaced with `BetaZero.accuracy`
+            is_accuracy_func = (i == 17)
+            if typeof(arg) == Vararg
+                if !is_accuracy_func
+                    push!(fields, arg[i]) # unroll Vararg element
+                end
+            else
+                if !is_accuracy_func
+                    push!(fields, arg)
+                end
+            end
+            i = i + 1
+        end
+        return BetaZeroSolver(fields...)
+    else
+        return BetaZeroSolver(args...)
+    end
+end
+
+Base.convert(::Type{AbstractMCTSSolver}, mcts_solver::AbstractMCTSSolver) = mcts_solver
