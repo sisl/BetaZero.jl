@@ -144,7 +144,7 @@ function policy_plot(pomdp::POMDP, policy::BetaZeroPolicy;
                     title="policy", kwargs...)
 
     as = actions(pomdp)
-    Yπ = (x,y)->as[argmax(policy.surrogate(Float32.([x y])')[2:end])]
+    Yπ = (x,y)->as[argmax(policy.surrogate(Float32.([x y])')[2:end-1])] # TODO: find [2:end] code, replace for safety case.
 
     if restrict_range
         if isnothing(solver)

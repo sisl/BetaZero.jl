@@ -1,14 +1,42 @@
-struct MaxQ end
+abstract type Criteria end
+
 
 """
-Return the best action based on the maximum Q-value.
+Extract either `qvalues` (Q), `counts` (N), or `safety` (S) from the tree.
 """
-function select_best(::MaxQ, tree, snode::Int)
-    best_Q = -Inf
+function extract_info(tree, snode::Int; counts=false, qvalues=false, safety=false, kwargs...)
+    m = length(tree.children[snode])
+    D = Dict()
+
+    counts && (D[:N] = Vector{Float64}(undef, m))
+    qvalues && (D[:Q] = Vector{Float64}(undef, m))
+    safety && (D[:S] = Vector{Float64}(undef, m))
+
+    for (i,child) in enumerate(tree.children[snode])
+        counts && (D[:N][i] = tree.n[child])
+        qvalues && (D[:Q][i] = tree.q[child])
+        safety && (D[:S][i] = 1 - exp(tree.f[child]))
+        # safety && (D[:S][i] = 1 - tree.f[child])
+    end
+    return NamedTuple{(collect(keys(D))...,)}((collect(values(D))...,))
+end
+
+
+"""
+Given a criteria, extract Q, N, of S info based on `kwargs` and then call the dispacted `probability_vector`.
+"""
+probability_vector(crit::Criteria, tree, snode; kwargs...) = probability_vector(crit, extract_info(tree, snode; kwargs...)...)
+
+
+"""
+General `select_best` via maximum for a given vector `P`.
+"""
+function select_best(P::Vector, tree, snode)
+    best = -Inf
     sanode = 0
-    for child in tree.children[snode]
-        if tree.q[child] > best_Q
-            best_Q = tree.q[child]
+    for (i,child) in enumerate(tree.children[snode])
+        if P[i] > best
+            best = P[i]
             sanode = child
         end
     end
@@ -16,195 +44,230 @@ function select_best(::MaxQ, tree, snode::Int)
 end
 
 
-struct MaxN end
-
 """
-Return the best action based on the maximum visit count.
+When setting temparature τ=0, we want to effectively select the max. So we use the `maxcrit` version of the criteria.
 """
-function select_best(::MaxN, tree, snode::Int)
-    best_N = -Inf
-    sanode = 0
-    for child in tree.children[snode]
-        if tree.n[child] > best_N
-            best_N = tree.n[child]
-            sanode = child
-        end
+function select_best_with_temp(crit::Criteria, maxcrit::Criteria, tree, snode::Int; kwargs...)
+    if τ == crit.τ
+        return select_best(maxcrit, tree, snode)
+    else
+        P = probability_vector(crit, tree, snode; kwargs...)
+        return sample_best(P, tree, snode)
     end
-    return sanode
 end
 
 
-@with_kw struct SampleN
-    τ = 1
-end
-
 """
-Return the best action based on exponentiated visit counts.
+General `sample_best` for a given probability vector `P`.
 """
-function select_best(crit::SampleN, tree, snode::Int)
-    _, N = compute_qvalues_and_counts(tree, snode)
-    τ = crit.τ
+function sample_best(P::Vector, tree, snode)
     A = tree.children[snode]
-    P = N.^(1/τ) ./ sum(N.^(1/τ)) # exponentiated visit counts
     return rand(SparseCat(A, P))
 end
 
 
-struct MaxQN end
 
-function compute_qvalues_and_counts(tree, snode::Int)
-    m = length(tree.children[snode])
-    Q = Vector{Float64}(undef, m)
-    N = Vector{Float64}(undef, m)
-    for (i,child) in enumerate(tree.children[snode])
-        Q[i] = tree.q[child]
-        N[i] = tree.n[child]
-    end
-    return Q, N
-end
+###########################################################
+###########################################################
+###########################################################
+
+
 
 """
-Return the best action using information from both Q-values and visit counts.
+Return the best action based on the maximum Q-value.
 """
-function select_best(::MaxQN, tree, snode::Int)
-    Q, N = compute_qvalues_and_counts(tree, snode)
-
-    best_QN = -Inf
-    sanode = 0
-    QN = softmax(Q) .* (N ./ sum(N)) # no normalization necessary for max.
-    for (i,child) in enumerate(tree.children[snode])
-        if QN[i] > best_QN
-            best_QN = QN[i]
-            sanode = child
-        end
-    end
-    return sanode
-end
+struct MaxQ <: Criteria end
+probability_vector(crit::MaxQ, info::NamedTuple) = normalize(info.Q, 1)
+select_best(crit::MaxQ, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true), tree, snode)
 
 
-@with_kw struct SampleQN
+
+###########################################################
+###########################################################
+###########################################################
+
+
+
+"""
+Return the best action based on the maximum visit count.
+"""
+struct MaxN <: Criteria end
+select_best(crit::MaxN, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; counts=true), tree, snode)
+probability_vector(crit::MaxN, info::NamedTuple) = probability_vector(SampleN(τ=1), info)
+
+
+"""
+Return the best action based on exponentiated visit counts.
+"""
+@with_kw struct SampleN <: Criteria
     τ = 1
 end
+select_best(crit::SampleN, tree, snode::Int) = select_best_with_temp(crit, MaxN(), tree, snode; counts=true)
+function probability_vector(crit::SampleN, info::NamedTuple)
+    N = info.N
+    τ = crit.τ
+    P = N.^(1/τ) ./ sum(N.^(1/τ)) # exponentiated visit counts
+    P = normalize(P, 1)
+    return P
+end
+
+
+
+###########################################################
+###########################################################
+###########################################################
+
+
 
 """
 Return the best action using information from both Q-values and visit counts.
 """
-function select_best(crit::SampleQN, tree, snode::Int)
+struct MaxQN <: Criteria end
+select_best(crit::MaxQN, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true, counts=true), tree, snode)
+probability_vector(crit::MaxQN, info::NamedTuple) = probability_vector(SampleQN(τ=1), info)
+
+
+@with_kw struct SampleQN <: Criteria
+    τ = 1
+end
+select_best(crit::SampleQN, tree, snode::Int) = select_best_with_temp(crit, MaxQN(), tree, snode; qvalues=true, counts=true)
+function probability_vector(crit::SampleQN, info::NamedTuple)
+    Q, N = info.Q, info.N
     τ = crit.τ
-    if τ == 0
-        return select_best(MaxQN(), tree, snode)
-    else
-        Q, N = compute_qvalues_and_counts(tree, snode)
-        QN = (softmax(Q) .* (N ./ sum(N))) .^ (1/τ)
-        P = normalize(QN, 1)
-        A = tree.children[snode]
-        return rand(SparseCat(A, P))
-    end
+    QN = (softmax(Q) .* (N ./ sum(N))) .^ (1/τ)
+    P = normalize(QN, 1)
+    return P
 end
 
 
-@with_kw struct MaxWeightedQN
+
+###########################################################
+###########################################################
+###########################################################
+
+
+
+"""
+Return the best action using information from both Q-values and visit counts.
+"""
+@with_kw struct MaxWeightedQN <: Criteria
     w = 0.5
 end
+select_best(crit::MaxWeightedQN, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true, counts=true), tree, snode)
+probability_vector(crit::MaxWeightedQN, info::NamedTuple) = probability_vector(SampleWeightedQN(τ=1, w=crit.w), info)
 
 
-"""
-Return the best action using information from both Q-values and visit counts.
-"""
-function select_best(crit::MaxWeightedQN, tree, snode::Int)
-    Q, N = compute_qvalues_and_counts(tree, snode)
-    w = crit.w
-
-    best_QN = -Inf
-    sanode = 0
-    QN = w*softmax(Q) .+ (1-w)*(N ./ sum(N))
-    for (i,child) in enumerate(tree.children[snode])
-        if QN[i] > best_QN
-            best_QN = QN[i]
-            sanode = child
-        end
-    end
-    return sanode
-end
-
-
-
-@with_kw struct SampleWeightedQN
+@with_kw struct SampleWeightedQN <: Criteria
     τ = 1
     w = 0.5
 end
-
-"""
-Return the best action using information from both Q-values and visit counts.
-"""
-function select_best(crit::SampleWeightedQN, tree, snode::Int)
+select_best(crit::SampleWeightedQN, tree, snode::Int) = select_best_with_temp(crit, MaxWeightedQN(w=crit.w), tree, snode; qvalues=true, counts=true)
+function probability_vector(crit::SampleWeightedQN, info::NamedTuple)
+    Q, N = info.Q, info.N
     τ = crit.τ
     w = crit.w
-    if τ == 0
-        return select_best(MaxWeightedQN(crit.w), tree, snode)
-    else
-        Q, N = compute_qvalues_and_counts(tree, snode)
-        QN = (w*softmax(Q) .+ (1-w)*(N ./ sum(N))) .^ (1/τ)
-        P = normalize(QN, 1)
-        A = tree.children[snode]
-        return rand(SparseCat(A, P))
-    end
+    QN = (w*softmax(Q) .+ (1-w)*(N ./ sum(N))) .^ (1/τ)
+    P = normalize(QN, 1)
+    return P
 end
 
 
 
+###########################################################
+###########################################################
+###########################################################
 
 
-@with_kw struct MaxZQN
+"""
+Return the best action using information from both Q-values and visit counts, exponentiated by zq and zn.
+"""
+@with_kw struct MaxZQN <: Criteria
     zq = 1
     zn = 1
 end
+select_best(crit::MaxZQN, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true, counts=true), tree, snode)
+probability_vector(crit::MaxZQN, info::NamedTuple) = probability_vector(SampleZQN(τ=1, zq=crit.zq, zn=crit.zn), info)
 
 
-"""
-Return the best action using information from both Q-values and visit counts.
-"""
-function select_best(crit::MaxZQN, tree, snode::Int)
-    Q, N = compute_qvalues_and_counts(tree, snode)
+@with_kw mutable struct SampleZQN <: Criteria
+    τ = 1
+    zq = 1
+    zn = 1
+end
+select_best(crit::SampleZQN, tree, snode::Int) = select_best_with_temp(crit, MaxZQN(zq=crit.zq, zn=crit.zn), tree, snode; qvalues=true, counts=true)
+function probability_vector(crit::SampleZQN, info::NamedTuple)
+    Q, N = info.Q, info.N
     zq = crit.zq
     zn = crit.zn
-    best_QN = -Inf
-    sanode = 0
     Nnorm = (N ./ sum(N))
-    QN = (softmax(Q).^zq .* Nnorm.^zn) # maximization doesn't need normalization
-    for (i,child) in enumerate(tree.children[snode])
-        if QN[i] > best_QN
-            best_QN = QN[i]
-            sanode = child
-        end
-    end
-    return sanode
+    Nnorm = (N ./ sum(N))
+    QN = (softmax(Q).^zq .* Nnorm.^zn) .^ (1/τ)
+    P = normalize(QN, 1)
+    return P
 end
 
 
 
-@with_kw mutable struct SampleZQN
+###########################################################
+###########################################################
+###########################################################
+
+
+"""
+Return the best action using information from Q-values, visit counts and safety. Exponentiated by zq and zn.
+"""
+@with_kw struct MaxZQNS <: Criteria
+    zq = 1
+    zn = 1
+end
+select_best(crit::MaxZQNS, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true, counts=true, safety=true), tree, snode)
+probability_vector(crit::MaxZQNS, info::NamedTuple) = probability_vector(SampleZQNS(τ=1, zq=crit.zq, zn=crit.zn), info)
+
+
+@with_kw mutable struct SampleZQNS <: Criteria
     τ = 1
     zq = 1
     zn = 1
 end
-
-"""
-Return the best action using information from both Q-values and visit counts.
-"""
-function select_best(crit::SampleZQN, tree, snode::Int)
+select_best(crit::SampleZQNS, tree, snode::Int) = select_best_with_temp(crit, MaxZQNS(zq=crit.zq, zn=crit.zn), tree, snode; qvalues=true, counts=true, safety=true)
+function probability_vector(crit::SampleZQNS, info)
+    Q, N, S = info.Q, info.N, info.S
     τ = crit.τ
     zq = crit.zq
     zn = crit.zn
-    if τ == 0
-        return select_best(MaxZQN(zq=crit.zq, zn=crit.zn), tree, snode)
-    else
-        Q, N = compute_qvalues_and_counts(tree, snode)
-        Nnorm = (N ./ sum(N))
-        QN = (softmax(Q).^zq .* Nnorm.^zn) .^ (1/τ)
-        P = normalize(QN, 1)
-        A = tree.children[snode]
-        return rand(SparseCat(A, P))
-    end
+    Nnorm = (N ./ sum(N))
+    Qbar = normalize01(Q; checkisnan=true)
+    softmaxQbarS = softmax(Qbar .* S)
+    SQN = (softmaxQbarS.^zq .* Nnorm.^zn) .^ (1/τ)
+    P = normalize(SQN, 1)
+    return P
 end
 
+
+
+
+###########################################################
+###########################################################
+###########################################################
+
+
+
+"""
+Select best based only on safety.
+"""
+struct MaxS <: Criteria end
+select_best(crit::MaxS, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; safety=true), tree, snode)
+probability_vector(crit::MaxS, info::NamedTuple) = probability_vector(SampleS(τ=1), info)
+
+
+@with_kw mutable struct SampleS <: Criteria
+    τ = 1
+end
+select_best(crit::SampleS, tree, snode::Int) = select_best_with_temp(crit, SampleS(), tree, snode; safety=true)
+function probability_vector(crit::SampleS, info::NamedTuple)
+    S = info.S
+    τ = crit.τ
+    Sτ = S .^ (1/τ)
+    P = normalize(Sτ, 1)
+    return P
+end

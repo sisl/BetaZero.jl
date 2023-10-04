@@ -46,6 +46,7 @@ export
     BeliefMDP,
     RawNetworkPolicy,
     RawValueNetworkPolicy,
+    Surrogate,
     initialize_network,
     calc_loss_weight,
     value_plot,
@@ -73,6 +74,7 @@ export
     network_lookup,
     value_lookup,
     policy_lookup,
+    pfail_lookup,
     dirichlet_noise,
     bootstrap,
     install_extras,
@@ -121,6 +123,7 @@ end
     b = nothing # current belief
     π = nothing # current policy estimate (using N(s,a))
     z = nothing # final discounted return of the episode
+    u = nothing # failure indication
 end
 
 
@@ -144,7 +147,7 @@ include("neural_network.jl") # Needs BetaZeroPolicy and RunningStats
 include("raw_network.jl") # Needs Surrogate defined.
 include("saving.jl") # Needs BetaZeroSolver and BetaZeroPolicy defined.
 include("plots.jl")
-
+include("failure_probability.jl")
 
 """
 The main BetaZero policy iteration algorithm.
@@ -177,6 +180,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate
         # x) Store generated data from the best surrogate.
         store_data!(solver, data)
         store_metrics!(solver, metrics)
+        display(plot_predicted_failure(pomdp, current_surrogate)) # TODO: remove
 
         # x) Optimize surrogate with recent simulated data.
         if i != solver.params.n_iterations
@@ -244,6 +248,11 @@ function attach_surrogate!(mcts_solver, nn_params::BetaZeroNetworkParameters, f:
     elseif mcts_solver isa PUCTSolver
         mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
         mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
+        mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
+    elseif mcts_solver isa CPUCTSolver
+        mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
+        mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
+        mcts_solver.estimate_failure=(bmdp,b)->pfail_lookup(f, b)
         mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
     else
         mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(f, b)
@@ -418,20 +427,22 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel, nn_params)
         if ismissing(data) && ismissing(metrics)
             # ignore missing data
-            B = Z = Π = metrics = discounted_return = missing
+            B = Z = Π = U = metrics = discounted_return = missing
         else
             B = []
             Z = []
             Π = []
+            U = []
             discounted_return = data[1].z
             for d in data
                 push!(B, d.b)
                 push!(Z, d.z)
                 push!(Π, d.π)
+                push!(U, d.u)
             end
         end
         put!(channel, true) # trigger progress bar update
-        B, Z, Π, metrics, discounted_return
+        B, Z, Π, U, metrics, discounted_return
     end, 1:inner_iter)
 
     put!(channel, false) # tell printing task to finish
@@ -439,8 +450,9 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     beliefs = vcat([d[1] for d in parallel_data if !ismissing(d[1])]...) # combine all beliefs
     returns = vcat([d[2] for d in parallel_data if !ismissing(d[2])]...) # combine all returns
     policy_vecs = vcat([d[3] for d in parallel_data if !ismissing(d[3])]...) # combine all policy vectors
-    metrics = vcat([d[4] for d in parallel_data if !ismissing(d[4])]...) # combine all metrics
-    G = vcat([d[5] for d in parallel_data if !ismissing(d[5])]...) # combine all final returns
+    failure_indicators = vcat([d[4] for d in parallel_data if !ismissing(d[4])]...) # combine all failure indicators
+    metrics = vcat([d[5] for d in parallel_data if !ismissing(d[5])]...) # combine all metrics
+    G = vcat([d[6] for d in parallel_data if !ismissing(d[6])]...) # combine all final returns
 
     solver.verbose && @info "Percent non-missing: $(length(G)/inner_iter*100)%"
 
@@ -462,10 +474,10 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
     end
 
     policy_vec = policy_vecs[1]
-    output_size = 1 + length(policy_vec) # [value, policy_vector...]
+    output_size = 1 + length(policy_vec) + 1 # [value, policy_vector..., failure_indicator]
     Y = Array{Float32}(undef, output_size, length(policy_vecs))
     for i in eachindex(policy_vecs)
-        Y[:,i] = [returns[i], policy_vecs[i]...]
+        Y[:,i] = [returns[i], policy_vecs[i]..., failure_indicators[i]]
     end
 
     data = (X=X, Y=Y, G=G)
@@ -578,9 +590,11 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             if haskey(info, :counts)
                 counts::Dict = info[:counts]
                 root_actions = collect(keys(counts))
-                root_counts_and_values = collect(values(counts))
-                root_counts = first.(root_counts_and_values)
-                root_values = last.(root_counts_and_values)
+                root_counts_values_pfail = collect(values(counts))
+                root_counts = map(root->root[1], root_counts_values_pfail)
+                root_values = map(root->root[2], root_counts_values_pfail)
+                root_pfail = map(root->root[3], root_counts_values_pfail)
+                root_safety = 1 .- root_pfail
             elseif haskey(info, :completed_policy)
                 completed_policy = info[:completed_policy]
             elseif haskey(info, :tree)
@@ -596,39 +610,8 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             if use_completed_policy_gumbel
                 P = completed_policy # Completed policy for guarenteed improvement (see Danihelka et al. 2022)
             else
-                if final_criterion isa MaxQN
-                    tree_P = normalize(softmax(root_values) .* root_counts, 1) # Q-weighted normalized counts (QWC)
-                elseif final_criterion isa MaxN
-                    tree_P = normalize(root_counts, 1) # Only use N(b,a) counts.
-                elseif final_criterion isa MaxQ
-                    tree_P = softmax(root_values) # Q-values
-                elseif final_criterion isa SampleQN
-                    τ = final_criterion.τ
-                    QN = (softmax(root_values) .* root_counts) .^ (1/τ)
-                    tree_P = normalize(QN, 1) # Exponentiated Q-weighted normalized counts (EQWC)
-                elseif final_criterion isa MaxZQN
-                    zq = final_criterion.zq
-                    zn = final_criterion.zn
-                    QN = (softmax(root_values).^zq .* root_counts.^zn)
-                    tree_P = normalize(QN, 1)
-                elseif final_criterion isa SampleZQN
-                    τ = final_criterion.τ
-                    zq = final_criterion.zq
-                    zn = final_criterion.zn
-                    QN = (softmax(root_values).^zq .* root_counts.^zn) .^ (1/τ)
-                    tree_P = normalize(QN, 1)
-                elseif final_criterion isa MaxWeightedQN
-                    w = final_criterion.w
-                    QN = (w*softmax(root_values) .+ (1-w)*root_counts)
-                    tree_P = normalize(QN, 1) # TODO: Unnecessary, already normalized.
-                elseif final_criterion isa SampleWeightedQN
-                    τ = final_criterion.τ
-                    w = final_criterion.w
-                    QN = (w*softmax(root_values) .+ (1-w)*root_counts) .^ (1/τ)
-                    tree_P = normalize(QN, 1) # Exponentiated Q-weighted normalized counts (EQWC)
-                else
-                    error("No policy data collection for the 'final_criterion' type of $(final_criterion)")
-                end
+                crit_info = (; Q=root_values, N=root_counts, S=root_safety)
+                tree_P = probability_vector(final_criterion, crit_info)
 
                 # Fill out entire policy vector for every action (if it wasn't seen in the tree, then p = ϵ for numerical stability)
                 for (i,a′) in enumerate(action_space)
@@ -683,8 +666,11 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             G = predicted_G
         end
 
+        # is_failure = BetaZero.failure(pomdp, b0, s0, states, actions, real_returns) # Note: Problem specific, provide function to compute this.
+
         for (t,d) in enumerate(data)
             d.z = G[t]
+            d.u = BetaZero.failure(pomdp, b0, s0, states[t:end], actions[t:end], real_returns[t:end]) # Note: Problem specific, provide function to compute this.
         end
         metrics = collect_metrics ? compute_performance_metrics(pomdp, data, b0, s0, beliefs, states, actions, real_returns, infos, T) : nothing
         return data, metrics

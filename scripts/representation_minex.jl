@@ -19,6 +19,7 @@ function BetaZero.accuracy(pomdp::MinExPOMDP, b0, s0, states, actions, returns)
     return is_correct
 end
 
+simple_minex_accuracy_func(pomdp::MinExPOMDP, b0, s0, states, actions, returns) = BetaZero.accuracy(pomdp, b0, s0, states, actions, returns) # Backwards compatability
 simple_minex_belief_reward(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a) for s in MinEx.particles(b.particles))
 
 BetaZero.optimal_return(pomdp::MinExPOMDP, s) = max(0, extraction_reward(pomdp, s))

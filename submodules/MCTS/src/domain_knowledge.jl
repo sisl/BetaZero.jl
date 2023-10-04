@@ -19,6 +19,15 @@ estimate_policy(f::Function, mdp::Union{POMDP,MDP}, state) = f(mdp, state)
 estimate_policy(estimator::Number, mdp::Union{POMDP,MDP}, state) = convert(Float64, estimator)
 
 """
+    estimate_failure(estimator, mdp, state)
+
+Return an estimate of the probablity of failure.
+"""
+function estimate_failure end
+estimate_failure(f::Function, mdp::Union{POMDP,MDP}, state) = f(mdp, state)
+estimate_failure(estimator::Number, mdp::Union{POMDP,MDP}, state) = convert(Float64, estimator)
+
+"""
 RolloutEstimator
 
 If this is passed to the estimate_value field of the solver, rollouts will be used to estimate the value at the leaf nodes
@@ -98,3 +107,12 @@ Return a value to initialize N(s,a) to based on domain knowledge.
 function init_N end
 init_N(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
 init_N(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Int, n)
+
+"""
+    init_F(initializer, mdp, s, a)
+
+Return a value to initialize F(s,a) to based on domain knowledge.
+"""
+function init_F end
+init_F(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
+init_F(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Float64, n)

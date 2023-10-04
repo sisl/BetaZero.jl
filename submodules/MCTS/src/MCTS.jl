@@ -23,6 +23,8 @@ export
     DARPlanner,
     PUCTSolver,
     PUCTPlanner,
+    CPUCTSolver,
+    CPUCTPlanner,
     BeliefMCTSSolver,
     AbstractMCTSPlanner,
     AbstractMCTSSolver,
@@ -37,8 +39,10 @@ export
     clear_tree!,
     estimate_value,
     estimate_policy,
+    estimate_failure,
     init_N,
     init_Q,
+    init_F,
     children,
     n_children,
     isroot,
@@ -52,7 +56,12 @@ export
     SampleQN,
     SampleN,
     MaxZQN,
-    SampleZQN
+    SampleZQN,
+    MaxZQNS,
+    SampleZQNS,
+    MaxS,
+    SampleS,
+    probability_vector
 
 export
     AbstractStateNode,
@@ -79,6 +88,8 @@ include("dar.jl")
 include("criteria.jl")
 include("puct_types.jl")
 include("puct.jl")
+include("cpuct_types.jl")
+include("cpuct.jl")
 include("action_gen.jl")
 include("util.jl")
 include("default_action.jl")

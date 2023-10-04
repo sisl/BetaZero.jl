@@ -68,7 +68,14 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
                         Flux.flatten,
                         Dense(out_conv_size_policy => action_size),
                         softmax,
-                    )
+                    ),
+                    pfail_head = Chain(
+                        ConvRegularizedLayer(filter_value, num_filters2=>num_filters_value)...,
+                        Flux.flatten,
+                        Dense(out_conv_size_value => ℓs, relu),
+                        Dense(ℓs => 1),
+                        sigmoid,
+                    ),
                 )
             )
         else
@@ -89,6 +96,11 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
                         DenseRegularizedLayer(num_dense2 => ℓs)...,
                         Dense(ℓs => action_size),
                         softmax,
+                    ),
+                    pfail_head = Chain(
+                        DenseRegularizedLayer(num_dense2 => ℓs)...,
+                        Dense(ℓs => 1),
+                        sigmoid,
                     )
                 )
             )
@@ -109,6 +121,11 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
                     DenseRegularizedLayer(ℓs => ℓs)...,
                     Dense(ℓs => action_size),
                     softmax,
+                ),
+                pfail_head = Chain(
+                    DenseRegularizedLayer(ℓs => ℓs)...,
+                    Dense(ℓs => 1),
+                    sigmoid,
                 )
             )
         )
@@ -197,9 +214,10 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     heads = f.layers[end]
     value_head = heads.layers.value_head
     if isa(value_head.layers[end], Function) && normalize_output
+        pfail_head = heads.layers.pfail_head
         policy_head = heads.layers.policy_head
         value_head = Chain(value_head.layers[1:end-1]...)
-        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head, pfail_head=pfail_head)
         f = Chain(f.layers[1:end-1]..., heads)
     end
 
@@ -215,29 +233,34 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     loss(x, y; w=value_loss_weight, info=Dict()) = begin
         local ỹ = f(x)
-        n = size(ỹ,1)-1
-        vmask = Flux.CuArray(vcat(1, zeros(Int,n)))
-        pmask = 1 .- vmask
+        n = size(ỹ,1) - 2 # minus 2 for value (first index) and failure indicator (last index)
+        vmask = Flux.CuArray(vcat(1, zeros(Int,n), 0))
+        pmask = Flux.CuArray(vcat(0, ones(Int,n), 0)) # 1 .- vmask
+        umask = Flux.CuArray(vcat(0, zeros(Int,n), 1))
         v = vmask .* ỹ # value prediction
         𝐩 = pmask .* ỹ # policy prediction
+        u = umask .* ỹ # failure prediction
         z = vmask .* y # true value
         π = pmask .* y # true policy vector
+        c = umask .* y # true failure indicator
 
-        value_loss = w*nn_params.loss_func(v, z)
+        value_loss = nn_params.loss_func(v, z)
         if use_kl_loss
-            policy_loss = (1-w)*Flux.Losses.kldivergence(𝐩, π)
+            policy_loss = Flux.Losses.kldivergence(𝐩, π)
         else
-            policy_loss = (1-w)*Flux.Losses.crossentropy(𝐩, π)
+            policy_loss = Flux.Losses.crossentropy(𝐩, π)
         end
+        failure_loss = Flux.Losses.binarycrossentropy(u, c) # TODO: (1-w) weighting
         regularization = penalty()
 
         ignore_derivatives() do
             info[:value_loss] = value_loss
             info[:policy_loss] = policy_loss
+            info[:failure_loss] = failure_loss
             info[:regularization] = regularization
         end
 
-        value_loss + policy_loss + regularization
+        value_loss + policy_loss + failure_loss + regularization
     end
 
     opt = nn_params.optimizer(lr)
@@ -253,14 +276,16 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     accs_train = []
     accs_valid = []
     learning_curve = nothing
-    checkpoint_loss_valid = Inf
-    checkpoint_loss_valid_value = Inf
-    checkpoint_loss_valid_policy = Inf
     checkpoint_loss_train = Inf
     checkpoint_loss_train_value = Inf
     checkpoint_loss_train_policy = Inf
-    checkpoint_acc_valid = 0
+    checkpoint_loss_train_failure = Inf
+    checkpoint_loss_valid = Inf
+    checkpoint_loss_valid_value = Inf
+    checkpoint_loss_valid_policy = Inf
+    checkpoint_loss_valid_failure = Inf
     checkpoint_acc_train = 0
+    checkpoint_acc_valid = 0
     f_checkpoint = f
 
     local loss_train = Inf
@@ -269,7 +294,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     local acc_valid = 0
     local checkpoint_epoch = Inf
 
-    logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid; extra="", digits=5) = string("Epoch: ", epoch, "\t Loss Train: ", round(loss_train; digits), " [", round(loss_train_value; digits), ", ", round(loss_train_policy; digits), "]\t Loss Val: ", round(loss_valid; digits), " [", round(loss_valid_value; digits), ", ", round(loss_valid_policy; digits), "]\t|\t Sign Acc. Train: ", rpad(round(acc_train; digits), digits+2, '0'), "\t Sign Acc. Val: ", rpad(round(acc_valid; digits), digits+2, '0'), extra)
+    logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid; extra="", sigdigits=5) = string("Epoch: ", epoch, "\t Loss Train: ", round(loss_train; sigdigits), " [", round(loss_train_value; sigdigits), ", ", round(loss_train_policy; sigdigits), ", ", round(loss_train_failure; sigdigits), "]\t Loss Val: ", round(loss_valid; sigdigits), " [", round(loss_valid_value; sigdigits), ", ", round(loss_valid_policy; sigdigits), ", ", round(loss_valid_failure; sigdigits), "]\t|\t Sign Acc. Train: ", rpad(round(acc_train; sigdigits), sigdigits+2, '0'), "\t Sign Acc. Val: ", rpad(round(acc_valid; sigdigits), sigdigits+2, '0'), extra)
 
     function plot_training(e, training_epochs, losses_train, losses_train_value, losses_train_policy, losses_valid, losses_valid_value, losses_valid_policy, key)
         learning_curve = plot(xlims=(1, training_epochs), title="learning curve: $key")
@@ -330,10 +355,12 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         loss_train = calc_loss(train_data; w, info=loss_train_info)
         loss_train_value = loss_train_info[:value_loss]
         loss_train_policy = loss_train_info[:policy_loss]
+        loss_train_failure = loss_train_info[:failure_loss]
         loss_valid_info = Dict()
         loss_valid = calc_loss(valid_data; w, info=loss_valid_info)
         loss_valid_value = loss_valid_info[:value_loss]
         loss_valid_policy = loss_valid_info[:policy_loss]
+        loss_valid_failure = loss_valid_info[:failure_loss]
         acc_train = calc_sign_accuracy(train_data)
         acc_valid = calc_sign_accuracy(valid_data)
         push!(losses_train, loss_train)
@@ -345,7 +372,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         push!(accs_train, acc_train)
         push!(accs_valid, acc_valid)
         if verbose && e % nn_params.verbose_update_frequency == 0
-            println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid))
+            println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid))
         end
         if e % nn_params.checkpoint_frequency == 0
             checkpoint_condition = nn_params.checkpoint_validation_loss ? loss_valid < checkpoint_loss_valid : loss_train < checkpoint_loss_train
@@ -360,7 +387,7 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
                 checkpoint_acc_train = acc_train
                 checkpoint_epoch = e
                 f_checkpoint = deepcopy(f)
-                verbose && println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_valid, loss_valid_value, loss_valid_policy, acc_train, acc_valid; extra=" [Checkpoint]"))
+                verbose && println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid; extra=" [Checkpoint]"))
             end
         end
 
@@ -391,15 +418,16 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
             checkpoint_loss_valid = loss_valid
             checkpoint_loss_valid_value = loss_valid_value
             checkpoint_loss_valid_policy = loss_valid_policy
+            checkpoint_loss_valid_failure = loss_valid_failure
             checkpoint_loss_train = loss_train
             checkpoint_loss_train_value = loss_train_value
-            checkpoint_loss_train_policy = loss_train_policy
+            checkpoint_loss_train_failure = loss_train_failure
             checkpoint_acc_valid = acc_valid
             checkpoint_acc_train = acc_train
             checkpoint_epoch = training_epochs
             f_checkpoint = deepcopy(f)
         end
-        verbose && println(logging_fn(checkpoint_epoch, checkpoint_loss_train, checkpoint_loss_train_value, checkpoint_loss_train_policy, checkpoint_loss_valid, checkpoint_loss_valid_value, checkpoint_loss_valid_policy, checkpoint_acc_train, checkpoint_acc_valid; extra=" [Final network checkpoint]"))
+        verbose && println(logging_fn(checkpoint_epoch, checkpoint_loss_train, checkpoint_loss_train_value, checkpoint_loss_train_policy, checkpoint_loss_train_failure, checkpoint_loss_valid, checkpoint_loss_valid_value, checkpoint_loss_valid_policy, checkpoint_loss_valid_failure, checkpoint_acc_train, checkpoint_acc_valid; extra=" [Final network checkpoint]"))
         f = f_checkpoint
     end
 
@@ -420,7 +448,8 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         value_head = heads.layers.value_head
         value_head = Chain(value_head.layers..., unnormalize_y)
         policy_head = heads.layers.policy_head
-        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+        pfail_head = heads.layers.pfail_head
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head, pfail_head=pfail_head)
         f = Chain(f.layers[1:end-1]..., heads)
     end
 
@@ -505,7 +534,7 @@ network_lookup(policy::BetaZeroPolicy, belief) = network_lookup(policy.surrogate
 function network_lookup(f::Union{Chain,EnsembleNetwork}, belief)
     x = network_input(belief)
     y = cpu(f(x)) # evaluate network `f`
-    return y[1], y[2:end] # [v, p...] NOTE: This ordering is different than the paper which defines (𝐩, v)
+    return y[1], y[2:end-1], y[end] # [v, p..., p_fail] NOTE: This ordering is different than the paper which defines (𝐩, v, p_fail)
 end
 
 
@@ -514,7 +543,7 @@ Evaluate the neural network `f` using the `belief` as input, return the predicte
 Note, inference is done on the CPU given a single input.
 """
 value_lookup(policy::BetaZeroPolicy, belief) = value_lookup(policy.surrogate, belief)
-value_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[1] # (v, p)
+value_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[1] # (v, p, u)
 POMDPs.value(policy::BetaZeroPolicy, belief) = value_lookup(policy, belief)
 POMDPs.value(f::Union{Chain,EnsembleNetwork}, belief) = value_lookup(f, belief)
 
@@ -524,7 +553,15 @@ Evaluate the neural network `f` using the `belief` as input, return the predicte
 Note, inference is done on the CPU given a single input.
 """
 policy_lookup(policy::BetaZeroPolicy, belief) = policy_lookup(policy.surrogate, belief)
-policy_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[2] # (v, p)
+policy_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[2] # (v, p, u)
+
+
+"""
+Evaluate the neural network `f` using the `belief` as input, return the predicted failure probability.
+Note, inference is done on the CPU given a single input.
+"""
+pfail_lookup(policy::BetaZeroPolicy, belief) = pfail_lookup(policy.surrogate, belief)
+pfail_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief)[3] # (v, p, u)
 
 
 """

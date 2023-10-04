@@ -172,3 +172,101 @@ function install_extras()
     # are no "expected pacakge X to be registered" errors.
     Pkg.develop(packages)
 end
+
+
+# # Backwards compatability
+# function BSON.newstruct!(x::BetaZeroSolver, fs...)
+#     old_fields = [
+#         :pomdp,
+#         :updater,
+#         :params,
+#         :nn_params,
+#         :gp_params,
+#         :data_buffer_train,
+#         :data_buffer_valid,
+#         :bmdp,
+#         :belief_reward,
+#         :include_info,
+#         :mcts_solver,
+#         :data_collection_policy,
+#         :use_data_collection_policy,
+#         :collect_metrics,
+#         :performance_metrics,
+#         :holdout_metrics,
+#         :accuracy_func, # Removed.
+#         :plot_incremental_data_gen,
+#         :plot_incremental_holdout,
+#         :display_plots,
+#         :save_plots,
+#         :plot_metrics_filename,
+#         :expert_results,
+#         :verbose,
+#     ]
+#     fn = fieldnames(typeof(x))
+#     offset = 0
+#     for (i, f) = enumerate(fs)
+#         if length(old_fields) >= i && length(fn) >= i && old_fields[i] != fn[i]
+#             offset += 1
+#             continue # skip old fields
+#         end
+#         f = convert(fieldtype(typeof(x),i-offset), f)
+#         ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), x, i-1-offset, f)
+#     end
+#     return x
+# end
+  
+
+# # Backwards compatability
+# function BetaZeroParameters(n_iterations::Int,
+#                             n_data_gen::Int,
+#                             n_evaluate::Int,
+#                             n_holdout::Int,
+#                             n_buffer::Int,
+#                             max_steps::Int,
+#                             λ_ucb::Real,
+#                             use_nn::Bool,
+#                             use_completed_policy_gumbel::Bool,
+#                             use_raw_policy_network::Bool,
+#                             use_raw_value_network::Bool,
+#                             raw_value_network_n_obs::Int,
+#                             skip_missing_reward_signal::Bool,
+#                             train_missing_on_predicted::Bool,
+#                             eval_on_accuracy::Bool,
+#                             # bootstrap_q::Bool, # Added.
+#                         )
+#     return BetaZeroParameters(; # kwargs
+#         n_iterations,
+#         n_data_gen,
+#         n_evaluate,
+#         n_holdout,
+#         n_buffer,
+#         max_steps,
+#         λ_ucb,
+#         use_nn,
+#         use_completed_policy_gumbel,
+#         use_raw_policy_network,
+#         use_raw_value_network,
+#         raw_value_network_n_obs,
+#         skip_missing_reward_signal,
+#         train_missing_on_predicted,
+#         eval_on_accuracy,
+#         bootstrap_q=false, # Added
+#     )
+# end
+
+# # Backwards compatability (changed from MCTS dev to local .MCTS)
+# Base.convert(::Type{AbstractMCTSSolver}, solver::Any) = solver
+# function recurse_convert(data::Any)
+#     typename = typeof(data).name.name
+#     if typename == :PUCTSolver
+#         args = [getproperty(data, p) for p in propertynames(data)]
+#         return eval(typename)(args...)
+#     elseif typename == :PUCTPlanner
+#         args = [recurse_convert(getproperty(data, p)) for p in propertynames(data)[1:2]] # only [Solver, (PO)MDP]
+#         return eval(typename)(args...)
+#     else
+#         return data
+#     end
+# end
+# Base.convert(::Type{AbstractMCTSPlanner}, planner::AbstractMCTSPlanner) = planner
+# Base.convert(::Type{AbstractMCTSPlanner}, planner::Any) = recurse_convert(planner)

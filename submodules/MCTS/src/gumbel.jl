@@ -337,7 +337,7 @@ function select_action(planner::GumbelPlanner, snode::Int, d::Int)
     s = tree.s_labels[snode]
 
     # TODO: move out as functions/cleanup
-    normalize_q(q) = normalize01(q, tree.q)
+    normalize_q(q) = normalize01(q, tree.q; checkisnan=true)
     N(a) = haskey(tree.a_lookup, (snode, a)) ? tree.n[tree.a_lookup[(snode, a)]] : 0
     # q̂(a) = haskey(tree.a_lookup, (snode, a)) ? normalize_q(tree.q[tree.a_lookup[(snode, a)]]) : normalize_q(estimate_value(planner.value_estimate, mdp, s, 0))
     q̂(a) = haskey(tree.a_lookup, (snode, a)) ? tree.q[tree.a_lookup[(snode, a)]] : estimate_value(planner.value_estimate, mdp, s, 0)

@@ -54,6 +54,9 @@ end
 # BetaZero.optimal_return(pomdp::LightDarkPOMDP, s) = pomdp.correct_r
 
 BetaZero.accuracy(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = returns[end] == pomdp.correct_r
+BetaZero.failure(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = returns[end] != pomdp.correct_r # either executed `stop` while not at the goal (pomdp.incorrect_r) or did not execute the stop action altogether (return == 0)
+# TODO: Change to CPOMDPs.jl cost_func and costs interface.
+
 lightdark_belief_reward(pomdp, b, a, bp) = mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))
 
 POMDPs.convert_s(::Type{A}, b::ParticleHistoryBelief{LightDarkState}, m::BeliefMDP) where A<:AbstractArray = eltype(A)[BetaZero.input_representation(b)...]

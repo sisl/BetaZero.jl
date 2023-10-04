@@ -17,6 +17,15 @@ accuracy(pomdp::POMDP, b0, s0, states, actions, returns) = nothing
 
 
 """
+    failure(pomdp::POMDP, b0, s0, states, actions, returns)
+
+Interface to determine if agent experienced a failure.
+"""
+function failure end
+failure(pomdp::POMDP, b0, s0, states, actions, returns) = nothing
+
+
+"""
     optimal_return(pomdp, state)
 
 Interface for computing the optimal return of a POMDP given a `state` (used for relative return calculations).

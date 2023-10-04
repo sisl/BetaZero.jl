@@ -23,4 +23,12 @@ function ranked_actions(tree::DPWTree, state)
     return sort!(tuples, by=last, rev=true)
 end
 
-normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))
+function normalize01(x, X; checkisnan=false)
+    xbar = (x - minimum(X)) / (maximum(X) - minimum(X))
+    if checkisnan && isnan(xbar)
+        return 0
+    else
+        return xbar
+    end
+end
+normalize01(X; kwargs...) = map(x->normalize01(x, X; kwargs...), X)

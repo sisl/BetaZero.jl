@@ -1,21 +1,21 @@
-POMDPs.solve(solver::PUCTSolver, mdp::Union{POMDP,MDP}) = PUCTPlanner(solver, mdp)
+POMDPs.solve(solver::CPUCTSolver, mdp::Union{POMDP,MDP}) = CPUCTPlanner(solver, mdp)
 
 """
 Delete existing decision tree.
 """
-function clear_tree!(p::PUCTPlanner)
+function clear_tree!(p::CPUCTPlanner)
     p.tree = nothing
 end
 
 """
-Construct an MCTSPUCT tree and choose the best action.
+Construct an MCTS-CPUCT tree and choose the best action.
 """
-POMDPs.action(p::PUCTPlanner, s) = first(action_info(p, s))
+POMDPs.action(p::CPUCTPlanner, s) = first(action_info(p, s))
 
 """
-Construct an MCTSPUCT tree and choose the best action. Also output some information.
+Construct an MCTS-CPUCT tree and choose the best action. Also output some information.
 """
-function POMDPTools.action_info(p::PUCTPlanner, s; tree_in_info=false, counts_in_info=false)
+function POMDPTools.action_info(p::CPUCTPlanner, s; tree_in_info=false, counts_in_info=false)
     local a::actiontype(p.mdp)
     info = Dict{Symbol, Any}()
     try
@@ -36,7 +36,7 @@ function POMDPTools.action_info(p::PUCTPlanner, s; tree_in_info=false, counts_in
                 snode = insert_state_node!(tree, s, true)
             end
         else
-            tree = PUCTTree{S,A}(p.solver.n_iterations)
+            tree = CPUCTTree{S,A}(p.solver.n_iterations)
             p.tree = tree
             snode = insert_state_node!(tree, s, p.solver.check_repeat_state)
         end
@@ -66,7 +66,9 @@ function POMDPTools.action_info(p::PUCTPlanner, s; tree_in_info=false, counts_in
             root_actions = tree.a_labels[root_idx]
             root_counts = tree.n[root_idx]
             root_values = tree.q[root_idx]
-            info[:counts] = Dict(map(i->Pair(root_actions[i], (root_counts[i], root_values[i])), eachindex(root_actions)))
+            # root_pfail = tree.f[root_idx]
+            root_pfail = exp.(tree.f[root_idx]) # Note exp done here
+            info[:counts] = Dict(map(i->Pair(root_actions[i], (root_counts[i], root_values[i], root_pfail[i])), eachindex(root_actions)))
         end
 
         sanode = select_best(p.solver.final_criterion, tree, snode)
@@ -81,9 +83,9 @@ end
 
 
 """
-Return the reward for one iteration of MCTSPUCT.
+Return the reward for one iteration of MCTS-CPUCT.
 """
-function simulate(dpw::PUCTPlanner, snode::Int, d::Int)
+function simulate(dpw::CPUCTPlanner, snode::Int, d::Int)
     S = statetype(dpw.mdp)
     A = actiontype(dpw.mdp)
     sol = dpw.solver
@@ -91,9 +93,11 @@ function simulate(dpw::PUCTPlanner, snode::Int, d::Int)
     s = tree.s_labels[snode]
     dpw.reset_callback(dpw.mdp, s) # Optional: used to reset/reinitialize MDP to a given state.
     if isterminal(dpw.mdp, s)
-        return 0.0
+        return 0.0, log(eps())
+        # return 0.0, 0.0
     elseif d == 0
-        return estimate_value(dpw.value_estimate, dpw.mdp, s, d)
+        # return estimate_value(dpw.value_estimate, dpw.mdp, s, d), estimate_failure(dpw.failure_estimate, dpw.mdp, s)
+        return estimate_value(dpw.value_estimate, dpw.mdp, s, d), log(estimate_failure(dpw.failure_estimate, dpw.mdp, s))
     end
 
     # action progressive widening
@@ -104,26 +108,31 @@ function simulate(dpw::PUCTPlanner, snode::Int, d::Int)
             n0 = init_N(sol.init_N, dpw.mdp, s, a)
             insert_action_node!(tree, snode, a, n0,
                                 init_Q(sol.init_Q, dpw.mdp, s, a),
+                                init_F(sol.init_F, dpw.mdp, s, a),
                                 false)
             tree.total_n[snode] += n0
         end
     end
     
     p = estimate_policy(dpw.policy_estimate, dpw.mdp, s)
-    sanode = best_sanode_PUCT(dpw.mdp, tree, snode, sol.exploration_constant, p)
+    # pfail = estimate_failure(dpw.failure_estimate, dpw.mdp, s)
+    sanode = best_sanode_CPUCT(dpw.mdp, tree, snode, sol.exploration_constant, p)
     a = tree.a_labels[sanode]
 
-    q = state_widen!(dpw, tree, sol, sanode, s, a, d)
+    # q, pfail′ = state_widen!(dpw, tree, sol, sanode, s, a, d)
+    q, logpfail′ = state_widen!(dpw, tree, sol, sanode, s, a, d)
 
     tree.n[sanode] += 1
     tree.total_n[snode] += 1
     tree.q[sanode] += (q - tree.q[sanode])/tree.n[sanode]
+    # tree.f[sanode] *= pfail′ # acculumate probability
+    tree.f[sanode] += logpfail′ # acculumate log-probability
 
     # max-Q backups
     # maxq_node = select_best(MaxQ(), tree, snode)
     # return tree.q[maxq_node]
 
-    return q
+    return q, tree.f[sanode]
 end
 
 
@@ -131,21 +140,22 @@ end
 """
 Action progressive widening.
 """
-function action_widen!(dpw::PUCTPlanner, tree, snode::Int, s)
+function action_widen!(dpw::CPUCTPlanner, tree, snode::Int, s)
     sol = dpw.solver
     if length(tree.children[snode]) <= sol.k_action*tree.total_n[snode]^sol.alpha_action # criterion for new action generation
-        a = next_action(dpw.next_action, dpw.mdp, s, PUCTStateNode(tree, snode)) # action generation step
+        a = next_action(dpw.next_action, dpw.mdp, s, CPUCTStateNode(tree, snode)) # action generation step
         add_action!(dpw, tree, snode, s, a)
     end
 end
 
 
-function add_action!(dpw::PUCTPlanner, tree, snode::Int, s, a)
+function add_action!(dpw::CPUCTPlanner, tree, snode::Int, s, a)
     sol = dpw.solver
     if !sol.check_repeat_action || !haskey(tree.a_lookup, (snode, a))
         n0 = init_N(sol.init_N, dpw.mdp, s, a)
         insert_action_node!(tree, snode, a, n0,
                             init_Q(sol.init_Q, dpw.mdp, s, a),
+                            init_F(sol.init_F, dpw.mdp, s, a),
                             sol.check_repeat_action
                            )
         tree.total_n[snode] += n0
@@ -157,7 +167,7 @@ end
 """
 State progressive widening.
 """
-function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
+function state_widen!(dpw::CPUCTPlanner, tree, sol, sanode, s, a, d)
     new_node = false
     if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
     # if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state) || tree.n_a_children[sanode] == 0 #! Note.
@@ -183,17 +193,22 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
     end
 
     if new_node
-        q = r + discount(dpw.mdp)*estimate_value(dpw.value_estimate, dpw.mdp, sp, d-1)
+        v′ = estimate_value(dpw.value_estimate, dpw.mdp, sp, d-1)
+        # pfail′ = estimate_failure(dpw.failure_estimate, dpw.mdp, sp)
+        logpfail′ = log(estimate_failure(dpw.failure_estimate, dpw.mdp, sp))
     else
-        q = r + discount(dpw.mdp)*simulate(dpw, spnode, d-1)
+        # v′, pfail′ = simulate(dpw, spnode, d-1)
+        v′, logpfail′ = simulate(dpw, spnode, d-1)
     end
+    q = r + discount(dpw.mdp)*v′
 
-    return q
+    # return q, pfail′
+    return q, logpfail′
 end
 
 
 
-function add_state!(sol::PUCTSolver, tree, sanode, sp, r)
+function add_state!(sol::CPUCTSolver, tree, sanode, sp, r)
     new_node = false
     if sol.check_repeat_state && haskey(tree.s_lookup, sp)
         spnode = tree.s_lookup[sp]
@@ -217,28 +232,30 @@ end
 
 
 """
-Return the best action node based on the PUCT score with exploration constant c
+Return the best action node based on the CPUCT score with exploration constant c
 """
-function best_sanode_PUCT(mdp::MDP, tree::PUCTTree, snode::Int, c::Float64, p::Vector)
-    best_PUCT = -Inf
+function best_sanode_CPUCT(mdp::MDP, tree::CPUCTTree, snode::Int, c::Float64, p::Vector)
+    best_CPUCT = -Inf
     sanode = 0
     Ns = sum(tree.total_n[snode])
     for child in tree.children[snode]
         n = tree.n[child]
         q = tree.q[child]
+        f = tree.f[child]
         if (Ns <= 0 && n == 0) || c == 0.0
-            PUCT = q
+            CPUCT = q
         else
             q = normalize01(q, tree.q; checkisnan=true)
             a = tree.a_labels[child]
             ai = findfirst(map(ab->a == ab, actions(mdp)))
             pa = p[ai]
-            PUCT = q + pa*c*sqrt(Ns)/(n+1)
+            # CPUCT = q*(1 - f) + pa*c*sqrt(Ns)/(n+1)
+            CPUCT = q*(1 - exp(f)) + pa*c*sqrt(Ns)/(n+1)
         end
-        @assert !isnan(PUCT) "PUCT was NaN (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n)"
-        @assert !isequal(PUCT, -Inf)
-        if PUCT > best_PUCT
-            best_PUCT = PUCT
+        @assert !isnan(CPUCT) "CPUCT was NaN (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n, f=$f)"
+        @assert !isequal(CPUCT, -Inf) "CPUCT was -Inf (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n, f=$f)"
+        if CPUCT > best_CPUCT
+            best_CPUCT = CPUCT
             sanode = child
         end
     end

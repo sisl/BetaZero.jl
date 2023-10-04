@@ -10,6 +10,11 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         save_plots=true,
                         plot_incremental_data_gen=true)
 
+# CPUCT-MCTS
+solver.mcts_solver = CPUCTSolver(solver.mcts_solver)
+solver.mcts_solver.final_criterion = MaxZQNS(zq=1, zn=1)
+# solver.mcts_solver.final_criterion = MaxS()
+
 # Neural network
 solver.nn_params.training_epochs = 50
 solver.nn_params.n_samples = 100_000
