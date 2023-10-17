@@ -46,11 +46,11 @@ POMDPs.isterminal(::LightDarkPOMDP, act::Int64) = act == 0
 POMDPs.isterminal(::LightDarkPOMDP, s::LightDarkState) = s.status < 0
 POMDPs.actions(::LightDarkPOMDP) = -1:1
 
-struct LDNormalStateDist
+struct LDNormalStateDist <: Sampleable{Univariate, Continuous}
     mean::Float64
     std::Float64
 end
-struct LDUniformStateDist
+struct LDUniformStateDist <: Sampleable{Univariate, Continuous}
     a::Float64
     b::Float64
 end
@@ -61,6 +61,9 @@ Base.rand(rng::AbstractRNG, d::LDUniformStateDist) = LightDarkState(0, rand(rng,
 Base.rand(rng::AbstractRNG, d::Union{LDNormalStateDist,LDUniformStateDist}, n::Int) = LightDarkState[rand(rng, d) for _ in 1:n]
 Base.rand(d::Union{LDNormalStateDist,LDUniformStateDist}) = rand(Random.GLOBAL_RNG, d)
 Base.rand(d::Union{LDNormalStateDist,LDUniformStateDist}, n::Int) = rand(Random.GLOBAL_RNG, d, n)
+
+Distributions.pdf(d::LDNormalStateDist, x) = pdf(Normal(d.mean, d.std), x)
+Distributions.pdf(d::LDUniformStateDist, x) = pdf(Uniform(d.a, d.b), x)
 
 POMDPs.initialstate(pomdp::LightDarkPOMDP; isuniform::Bool=false) = isuniform ? LDUniformStateDist(-30, 30) : LDNormalStateDist(2, 3)
 POMDPs.initialobs(m::LightDarkPOMDP, s) = observation(m, s)
