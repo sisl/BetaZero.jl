@@ -93,6 +93,4 @@ end
 POMDPs.convert_s(::Type{A}, s::LightDarkState, p::LightDarkPOMDP) where A<:AbstractArray = eltype(A)[s.status, s.y]
 POMDPs.convert_s(::Type{LightDarkState}, s::A, p::LightDarkPOMDP) where A<:AbstractArray = LightDarkState(Int64(s[1]), s[2])
 
-POMDPs.initialstate(pomdp::LightDarkPOMDP; kwargs...) = initialstate(pomdp; kwargs...) # deprecated in POMDPs v0.9
-
 end # module LightDark
