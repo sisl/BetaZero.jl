@@ -34,7 +34,7 @@ using Distributed
 
         μ, σ = mean_and_std([begin
             Random.seed!(seed+i) # Seed to control initial state
-            ds0 = initialstate_distribution(pomdp)
+            ds0 = initialstate(pomdp)
             s0 = rand(ds0)
             b0 = initialize_belief(up, ds0)
             simulate(RolloutSimulator(), pomdp, planner, up, b0, s0)

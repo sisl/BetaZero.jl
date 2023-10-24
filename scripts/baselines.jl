@@ -471,7 +471,7 @@ for ϵ_greedy in ϵ_sweep
                                         local results = pmap(i->begin
                                             Random.seed!(i) # Make sure each policy has an apples-to-apples comparison (e.g., same starting episode states, etc.)
                                             Random.seed!(rand(1:typemax(UInt32))) # To ensure that we don't use initial states or beliefs that were seen during BetaZero training (still deterministic based on previous `seed!` call)
-                                            ds0 = initialstate_distribution(pomdp)
+                                            ds0 = initialstate(pomdp)
                                             s0 = rand(ds0)
                                             b0 = initialize_belief(up, ds0)
                                             history = simulate(HistoryRecorder(max_steps=max_steps), pomdp, π, up, b0, s0)

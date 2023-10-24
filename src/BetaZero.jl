@@ -412,7 +412,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         seed = parse(Int, string(outer_iter, lpad(i, length(digits(inner_iter)), '0'))) # 1001, 1002, etc. for BetaZero outer_iter=1
         Random.seed!(seed)
         # @info "Generating data ($i/$(inner_iter)) with seed ($seed)"
-        ds0 = initialstate_distribution(pomdp)
+        ds0 = initialstate(pomdp)
         s0 = rand(ds0)
         b0 = initialize_belief(up, ds0)
         data, metrics = run_simulation(pomdp, planner, up, b0, s0; collect_metrics, include_info, max_steps, skip_missing_reward_signal, train_missing_on_predicted, final_criterion, use_completed_policy_gumbel, nn_params)
