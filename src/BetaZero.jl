@@ -76,8 +76,12 @@ export
     dirichlet_noise,
     bootstrap,
     install_extras,
-    accuracy
+    accuracy,
+    mean_belief_reward,
+    mean_belief_reward′
 
+mean_belief_reward(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a) for s in particles(b)) # reward function: R(b,a,b′), uses R(s,a)
+mean_belief_reward′(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a, sp) for (s,sp) in zip(particles(b), particles(bp))) # reward function: R(b,a,b′), uses R(s,a,sp)
 
 @with_kw mutable struct BetaZeroSolver <: POMDPs.Solver
     pomdp::POMDP
@@ -88,7 +92,7 @@ export
     data_buffer_train::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for training (Note: Each simulation has multiple time steps of data)
     data_buffer_valid::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for validation (Note: Making sure to clearly separate training from validation to prevent data leakage)
     bmdp::Union{BeliefMDP,Nothing} = nothing # Belief-MDP version of the POMDP
-    belief_reward::Function = (pomdp::POMDP, b, a, bp)->mean(reward(pomdp, s, a) for s in particles(b)) # reward function: R(b,a,b′)
+    belief_reward::Function = mean_belief_reward
     include_info::Bool = false # Include `action_info` in metrics when running POMDP simulation
     mcts_solver::AbstractMCTSSolver = PUCTSolver(n_iterations=100,
                                                 check_repeat_action=true,
