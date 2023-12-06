@@ -7,11 +7,13 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
     action_size = nn_params.action_size
     activation = nn_params.activation
     ℓs = nn_params.layer_size
+    network_depth = nn_params.network_depth
 
     use_dropout = nn_params.use_dropout
     p_dropout = nn_params.p_dropout
     use_batchnorm = nn_params.use_batchnorm
     batchnorm_momentum = nn_params.batchnorm_momentum
+    # use_order_invariant_layer = true # ! TODO: Parameterize
 
     function DenseRegularizedLayer(in_out::Pair)
         input, output = in_out
@@ -109,8 +111,9 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
         # Simple fully-connected MLP (default for non-CNN inputs).
         return Chain(
             DenseRegularizedLayer(prod(input_size) => ℓs)...,
-            DenseRegularizedLayer(ℓs => ℓs)...,
-            DenseRegularizedLayer(ℓs => ℓs)...,
+            collect(Iterators.flatten([DenseRegularizedLayer(ℓs => ℓs) for _ in 1:network_depth]))...,
+            # use_order_invariant_layer ? x -> mean(x; dims=2) : x -> x, # ! NOTE.
+            # use_order_invariant_layer ? x -> sum(x; dims=1) : x -> x, # ! NOTE.
             Parallel(vcat,
                 value_head = Chain(
                     DenseRegularizedLayer(ℓs => ℓs)...,
@@ -294,8 +297,6 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     local acc_valid = 0
     local checkpoint_epoch = Inf
 
-    logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid; extra="", sigdigits=5) = string("Epoch: ", epoch, "\t Loss Train: ", round(loss_train; sigdigits), " [", round(loss_train_value; sigdigits), ", ", round(loss_train_policy; sigdigits), ", ", round(loss_train_failure; sigdigits), "]\t Loss Val: ", round(loss_valid; sigdigits), " [", round(loss_valid_value; sigdigits), ", ", round(loss_valid_policy; sigdigits), ", ", round(loss_valid_failure; sigdigits), "]\t|\t Sign Acc. Train: ", rpad(round(acc_train; sigdigits), sigdigits+2, '0'), "\t Sign Acc. Val: ", rpad(round(acc_valid; sigdigits), sigdigits+2, '0'), extra)
-
     function plot_training(e, training_epochs, losses_train, losses_train_value, losses_train_policy, losses_valid, losses_valid_value, losses_valid_policy, key)
         learning_curve = plot(xlims=(1, training_epochs), title="learning curve: $key")
         plot!(1:e, losses_train, label="training", c=1)
@@ -372,22 +373,24 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         push!(accs_train, acc_train)
         push!(accs_valid, acc_valid)
         if verbose && e % nn_params.verbose_update_frequency == 0
-            println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid))
+            logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid)
         end
-        if e % nn_params.checkpoint_frequency == 0
+        if nn_params.use_checkpoint && e % nn_params.checkpoint_frequency == 0
             checkpoint_condition = nn_params.checkpoint_validation_loss ? loss_valid < checkpoint_loss_valid : loss_train < checkpoint_loss_train
             if checkpoint_condition
                 checkpoint_loss_valid = loss_valid
                 checkpoint_loss_valid_value = loss_valid_value
                 checkpoint_loss_valid_policy = loss_valid_policy
+                checkpoint_loss_valid_failure = loss_valid_failure
                 checkpoint_loss_train = loss_train
                 checkpoint_loss_train_value = loss_train_value
                 checkpoint_loss_train_policy = loss_train_policy
+                checkpoint_loss_train_failure = loss_train_failure
                 checkpoint_acc_valid = acc_valid
                 checkpoint_acc_train = acc_train
                 checkpoint_epoch = e
                 f_checkpoint = deepcopy(f)
-                verbose && println(logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid; extra=" [Checkpoint]"))
+                verbose && logging_fn(e, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid; extra="[Checkpoint]")
             end
         end
 
@@ -421,13 +424,14 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
             checkpoint_loss_valid_failure = loss_valid_failure
             checkpoint_loss_train = loss_train
             checkpoint_loss_train_value = loss_train_value
+            checkpoint_loss_train_policy = loss_train_policy
             checkpoint_loss_train_failure = loss_train_failure
             checkpoint_acc_valid = acc_valid
             checkpoint_acc_train = acc_train
             checkpoint_epoch = training_epochs
             f_checkpoint = deepcopy(f)
         end
-        verbose && println(logging_fn(checkpoint_epoch, checkpoint_loss_train, checkpoint_loss_train_value, checkpoint_loss_train_policy, checkpoint_loss_train_failure, checkpoint_loss_valid, checkpoint_loss_valid_value, checkpoint_loss_valid_policy, checkpoint_loss_valid_failure, checkpoint_acc_train, checkpoint_acc_valid; extra=" [Final network checkpoint]"))
+        verbose && logging_fn(checkpoint_epoch, checkpoint_loss_train, checkpoint_loss_train_value, checkpoint_loss_train_policy, checkpoint_loss_train_failure, checkpoint_loss_valid, checkpoint_loss_valid_value, checkpoint_loss_valid_policy, checkpoint_loss_valid_failure, checkpoint_acc_train, checkpoint_acc_valid; extra="Final\nnetwork\ncheckpoint")
         f = f_checkpoint
     end
 
@@ -517,6 +521,25 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 end
 
 
+function logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss_train_failure, loss_valid, loss_valid_value, loss_valid_policy, loss_valid_failure, acc_train, acc_valid; extra="", sigdigits=5)
+    loss_train = round(loss_train; sigdigits)
+    loss_train_value = round(loss_train_value; sigdigits)
+    loss_train_policy = round(loss_train_policy; sigdigits)
+    loss_train_failure = round(loss_train_failure; sigdigits)
+    loss_valid = round(loss_valid; sigdigits)
+    loss_valid_value = round(loss_valid_value; sigdigits)
+    loss_valid_policy = round(loss_valid_policy; sigdigits)
+    loss_valid_failure = round(loss_valid_failure; sigdigits)
+    acc_train = rpad(round(acc_train; sigdigits), sigdigits+2, '0')
+    acc_valid = rpad(round(acc_valid; sigdigits), sigdigits+2, '0')
+
+    columns = ["Epoch", "Loss Train", "Loss Val.", "Acc. Train", "Acc. Val.", "Extra"] 
+    log = [epoch join([loss_train, "Vθ = $loss_train_value", "Pθ = $loss_train_policy", "Fθ = $loss_train_failure"], "\n") join([loss_valid, "Vθ = $loss_valid_value", "Pθ = $loss_valid_policy", "Fθ = $loss_valid_failure"], "\n") acc_train acc_valid extra]
+
+    pretty_table(DataFrame(log, columns); linebreaks=true)
+end
+
+
 """
 Get belief representation for network input, add batch dimension for Flux.
 """
@@ -567,7 +590,7 @@ pfail_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief
 """
 Use predicted policy vector to sample next action.
 """
-function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,EnsembleNetwork}, nn_params::BetaZeroNetworkParameters, bnode)
+function next_action(problem::Union{BeliefMDP, BeliefCCMDP, POMDP}, belief, f::Union{Chain,EnsembleNetwork}, nn_params::BetaZeroNetworkParameters, bnode)
     Ab = POMDPs.actions(problem, belief)
 
     if nn_params.use_prioritized_action_selection
@@ -590,21 +613,30 @@ function next_action(problem::Union{BeliefMDP, POMDP}, belief, f::Union{Chain,En
 
         # Zero-out already tried actions
         if nn_params.zero_out_tried_actions
+            _p = deepcopy(p)
+            ϵ = 1e-6
             action_indices = bnode.tree.children[bnode.index]
             tried_actions = bnode.tree.a_labels[action_indices]
             if !isempty(tried_actions) && length(tried_actions) != length(Ab)
                 for (i,a) in enumerate(tried_actions)
                     for (j,ab) in enumerate(Ab)
                         if a == ab
-                            p[j] = 1e-6 # zero-out
+                            p[j] = ϵ # zero-out
                             break
                         end
                     end
                 end
             end
+            if all(p .== ϵ)
+                p = _p # cycle probabilities if they've all been tried
+            end
         end
 
         p = normalize(p, 1) # re-normalize to sum to 1
+
+        if all(isnan.(p))
+            p = normalize(ones(length(p)), 1)
+        end
 
         if nn_params.use_epsilon_greedy && rand() < nn_params.ϵ_greedy
             return rand(Ab)

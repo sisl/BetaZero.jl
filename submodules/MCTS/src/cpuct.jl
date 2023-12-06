@@ -68,6 +68,7 @@ function POMDPTools.action_info(p::CPUCTPlanner, s; tree_in_info=false, counts_i
             root_values = tree.q[root_idx]
             # root_pfail = tree.f[root_idx]
             root_pfail = exp.(tree.f[root_idx]) # Note exp done here
+            # @show root_pfail
             info[:counts] = Dict(map(i->Pair(root_actions[i], (root_counts[i], root_values[i], root_pfail[i])), eachindex(root_actions)))
         end
 
@@ -126,7 +127,9 @@ function simulate(dpw::CPUCTPlanner, snode::Int, d::Int)
     tree.total_n[snode] += 1
     tree.q[sanode] += (q - tree.q[sanode])/tree.n[sanode]
     # tree.f[sanode] *= pfail′ # acculumate probability
-    tree.f[sanode] += logpfail′ # acculumate log-probability
+    # tree.f[sanode] += logpfail′ # acculumate log-probability
+    tree.f[sanode] += log(discount(dpw.mdp)) + logpfail′ # acculumate discounted log-probability
+    # tree.f[sanode] = logpfail′ # DON'T ACCUMULATE
 
     # max-Q backups
     # maxq_node = select_best(MaxQ(), tree, snode)
@@ -246,11 +249,16 @@ function best_sanode_CPUCT(mdp::MDP, tree::CPUCTTree, snode::Int, c::Float64, p:
             CPUCT = q
         else
             q = normalize01(q, tree.q; checkisnan=true)
+            # expf = normalize01(exp(f), exp.(tree.f); checkisnan=true)
             a = tree.a_labels[child]
             ai = findfirst(map(ab->a == ab, actions(mdp)))
             pa = p[ai]
             # CPUCT = q*(1 - f) + pa*c*sqrt(Ns)/(n+1)
+            # @show (1 - exp(f))
+            # @show exp(f)
+            # @show f
             CPUCT = q*(1 - exp(f)) + pa*c*sqrt(Ns)/(n+1)
+            # CPUCT = q*(1 - expf) + pa*c*sqrt(Ns)/(n+1)
         end
         @assert !isnan(CPUCT) "CPUCT was NaN (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n, f=$f)"
         @assert !isequal(CPUCT, -Inf) "CPUCT was -Inf (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n, f=$f)"

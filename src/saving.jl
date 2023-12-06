@@ -169,7 +169,7 @@ For backwards compatability with policies saved before commit c0cff08 on June 1,
 (i.e., input `accuracy_func` was replaced with `BetaZero.accuracy` interface function).
 """
 function BSON.newstruct!(::BetaZeroSolver, args...)
-    if length(args) > 23
+    if length(args) == 23
         fields = []
         i = 1
         for arg in args

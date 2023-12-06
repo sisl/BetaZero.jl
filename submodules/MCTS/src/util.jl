@@ -1,6 +1,14 @@
 # various utility functions
 
 """
+isfailure(m::POMDP, state, action)
+isfailure(m::MDP, state, action)
+
+Return if the state-action pair is a failure.
+"""
+function isfailure end
+
+"""
 Return a vector of action=>Q pairs ranked by Q.
 
 For debugging/ checking purposes - this may be slow

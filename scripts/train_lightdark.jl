@@ -1,9 +1,13 @@
-include("launch_lightdark.jl")
-include("solver_lightdark.jl")
+resume = false
+if resume
+    policy = solve(solver, pomdp; surrogate=policy.surrogate, resume)
+else
+    include("launch_lightdark.jl")
+    include("solver_lightdark.jl")
+    policy = solve(solver, pomdp)
+end
 
-filename_suffix = "lightdark"
-
-policy = solve(solver, pomdp)
+filename_suffix = "lightdark_testing_safety"
 BetaZero.save_policy(policy, "policy_$filename_suffix.bson")
 BetaZero.save_solver(solver, "solver_$filename_suffix.bson")
 

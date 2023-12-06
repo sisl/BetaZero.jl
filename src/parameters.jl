@@ -40,6 +40,7 @@ Parameters for neural network surrogate model.
     loss_func::Function = Flux.Losses.mse            # MAE works well for problems with large returns around zero, and spread out otherwise.
     activation::Function = relu                      # Activation function
     layer_size::Int = 64                             # Number of connections in fully connected layers (for CNN, refers to fully connected "head" layers)
+    network_depth::Int = 2                           # Depth of the neural network (not including first layer and heads)
     use_cnn::Bool = false                            # Use convolutional neural network
     use_deepmind_arch::Bool = false                  # Use simplified non-resnet architecture from AlphaZero
     cnn_params::NamedTuple = (filter=(5,5), num_filters=[64, 128], num_dense=[256, 256])

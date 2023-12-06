@@ -109,10 +109,10 @@ init_N(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
 init_N(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Int, n)
 
 """
-    init_F(initializer, mdp, s, a)
+    init_F(initializer, mdp, s)
 
 Return a value to initialize F(s,a) to based on domain knowledge.
 """
 function init_F end
-init_F(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
-init_F(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Float64, n)
+init_F(f::Function, mdp::Union{MDP,POMDP}, s) = f(mdp, s)
+init_F(n::Number, mdp::Union{MDP,POMDP}, s) = convert(Float64, n)

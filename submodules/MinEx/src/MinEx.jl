@@ -58,7 +58,7 @@ function POMDPs.initialstate(pomdp::MinExPOMDP)
     grid_dims = (pomdp.grid_dims..., 1)
     mineral_pomdp = MineralExplorationPOMDP(grid_dim=grid_dims, high_fidelity_dim=grid_dims)
     initialize_data!(mineral_pomdp, 0)
-    return MinExStateDistribution(initialstate_distribution(mineral_pomdp))
+    return MinExStateDistribution(initialstate(mineral_pomdp))
 end
 
 function Base.rand(rng::Random.AbstractRNG, d::MinExStateDistribution)

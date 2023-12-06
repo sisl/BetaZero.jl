@@ -7,6 +7,7 @@ using StatsBase
 using POMDPs
 
 USE_LIGHTDARK_5 = false
+USE_CC_LIGHTDARK = true # ! NOTE.
 
 if USE_LIGHTDARK_5
     # Old light dark with light region around 5: LightDark(5)
@@ -17,44 +18,79 @@ else
     pomdp = LightDarkPOMDP()
 end
 
+if USE_CC_LIGHTDARK
+    pomdp.incorrect_r = 0 # No explicit failure penalty
+    # pomdp.max_time = 90
+    # pomdp.discount_factor = 0.9
+end
+
 up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, 500))
 
 function BetaZero.input_representation(b::ParticleHistoryBelief{LightDarkState};
         include_std::Bool=true, # Important to capture uncertainty in belief.
         use_higher_orders::Bool=false,
         include_action::Bool=false,
-        include_obs::Bool=false)
+        include_obs::Bool=false,
+        include_time::Bool=true,
+        use_order_invariant_layer=false)
     Y = [s.y for s in ParticleFilters.particles(b)]
-    μ = mean(Y)
-    σ = std(Y)
-    local b̃
-    if use_higher_orders
-        zeroifnan(x) = isnan(x) ? 0 : x
-        s = zeroifnan(skewness(Y))
-        k = zeroifnan(kurtosis(Y))
-        b̃ = Float32[μ, σ, s, k]
+    t = Float32(ParticleFilters.particles(b)[1].t) # all the same time
+    # if include_time
+    #     Y = vcat(Y, t)
+    # end
+    if use_order_invariant_layer
+        return include_time ? vcat(Y, t) : Y
     else
-        if include_std
-            b̃ = Float32[μ, σ]
+        μ = mean(Y)
+        σ = std(Y)
+        local b̃
+        if use_higher_orders
+            zeroifnan(x) = isnan(x) ? 0 : x
+            s = zeroifnan(skewness(Y))
+            k = zeroifnan(kurtosis(Y))
+            b̃ = Float32[μ, σ, s, k]
         else
-            b̃ = Float32[μ]
+            if include_std
+                b̃ = Float32[μ, σ]
+            else
+                b̃ = Float32[μ]
+            end
         end
+        if include_obs
+            o = isempty(b.observations) ? 0.f0 : b.observations[end]
+            b̃ = [b̃..., o]
+        end
+        if include_action
+            a = isempty(b.actions) ? -999 : b.actions[end]
+            b̃ = [b̃..., a]
+        end
+        if include_time
+            b̃ = vcat(b̃, t)
+        end
+        return b̃
     end
-    if include_obs
-        o = isempty(b.observations) ? 0.f0 : b.observations[end]
-        b̃ = [b̃..., o]
-    end
-    if include_action
-        a = isempty(b.actions) ? -999 : b.actions[end]
-        b̃ = [b̃..., a]
-    end
-    return b̃
 end
 
 # BetaZero.optimal_return(pomdp::LightDarkPOMDP, s) = pomdp.correct_r
 
-BetaZero.accuracy(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = returns[end] == pomdp.correct_r
-BetaZero.failure(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = returns[end] != pomdp.correct_r # either executed `stop` while not at the goal (pomdp.incorrect_r) or did not execute the stop action altogether (return == 0)
+# executed `stop` while not at the goal, or failed to execute stop at max time (states[end-1] as states = [s0] then pushes sp for every action)
+function MCTS.isfailure(pomdp::LightDarkPOMDP, s::LightDarkState, a)
+    if a == 0
+        return abs(s.y) ≥ 1
+    else
+        return s.t ≥ pomdp.max_time
+    end
+end
+        
+# MCTS.isfailure(pomdp::LightDarkPOMDP, b::ParticleHistoryBelief{LightDarkState}, a) = any(MCTS.isfailure(pomdp, s, a) for s in particles(b))
+MCTS.isfailure(pomdp::LightDarkPOMDP, b::ParticleHistoryBelief{LightDarkState}, a) = mean(MCTS.isfailure(pomdp, s, a) for s in particles(b))
+
+BetaZero.accuracy(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = !BetaZero.failure(pomdp, b0, s0, states, actions, returns)
+BetaZero.failure(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = MCTS.isfailure(pomdp, states[end], actions[end]) # (states[end-1] as states = [s0] then pushes sp for every action)
+# BetaZero.failure(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = MCTS.isfailure(pomdp, states[end-1], actions[end]) # (states[end-1] as states = [s0] then pushes sp for every action)
+# isempty(actions) ? false : actions[end] == 0 && abs(states[end-1].y) ≥ 1 # executed `stop` while not at the goal (states[end-1] as states = [s0] then pushes sp for every action)
+# BetaZero.failure(pomdp::LightDarkPOMDP, b0, s0, states, actions, returns) = returns[end] == pomdp.incorrect_r # executed `stop` while not at the goal (pomdp.incorrect_r)
+
 # TODO: Change to CPOMDPs.jl cost_func and costs interface.
 
 lightdark_belief_reward(pomdp, b, a, bp) = mean(reward(pomdp, s, a) for s in ParticleFilters.particles(b))

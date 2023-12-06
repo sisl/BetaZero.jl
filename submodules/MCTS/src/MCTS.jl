@@ -25,6 +25,8 @@ export
     PUCTPlanner,
     CPUCTSolver,
     CPUCTPlanner,
+    CBZSolver,
+    CBZPlanner,
     BeliefMCTSSolver,
     AbstractMCTSPlanner,
     AbstractMCTSSolver,
@@ -59,9 +61,8 @@ export
     SampleZQN,
     MaxZQNS,
     SampleZQNS,
-    MaxS,
-    SampleS,
-    probability_vector
+    probability_vector,
+    isfailure
 
 export
     AbstractStateNode,
@@ -88,6 +89,8 @@ include("dar.jl")
 include("criteria.jl")
 include("puct_types.jl")
 include("puct.jl")
+include("cbz_types.jl")
+include("cbz.jl")
 include("cpuct_types.jl")
 include("cpuct.jl")
 include("action_gen.jl")

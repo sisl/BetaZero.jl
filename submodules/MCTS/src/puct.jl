@@ -23,6 +23,8 @@ function POMDPTools.action_info(p::PUCTPlanner, s; tree_in_info=false, counts_in
             error("""
                   MCTS cannot handle terminal states. action was called with
                   s = $s
+                  μ = $(s.ukf.μ)
+                  Σ = $(s.ukf.Σ)
                   """)
         end
 

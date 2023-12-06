@@ -1,3 +1,5 @@
+MCTS.isfailure(bmdp::BeliefCCMDP, b, a) = bmdp.isfailure(bmdp.pomdp, b, a)
+
 """
 Run @time on expression based on `verbose` flag.
 """
