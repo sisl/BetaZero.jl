@@ -1,6 +1,6 @@
 # BetaZero.jl
 
-Belief-state planning algorithm for POMDPs using learned approximations; integrated into the [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) ecosystem.
+Belief-state planning algorithm for POMDPs using learned approximations; integrated into the [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) ecosystem. Implementations of the BetaZero (POMDP) and ConstrainedZero (CC-POMDP) policy iteration algorithms.
 
 <!-- ![light mode](/media/betazero.svg#gh-light-mode-only) -->
 <!-- ![dark mode](/media/betazero-dark.svg#gh-dark-mode-only) -->
@@ -72,6 +72,16 @@ save_policy(policy, "policy.bson")
 save_solver(solver, "solver.bson")
 ```
 This example is also located at: [`scripts/readme_example.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/readme_example.jl)
+
+## ConstrainedZero usage
+To run using ConstainedZero (_citation under review_), turn on the `is_constrained` flag in the `BetaZeroSolver`:
+```julia
+solver.is_constrained = true
+```
+> NOTE: Make sure to remove any failure penalties from the POMDP reward function as well, e.g.,:
+```julia
+pomdp.incorrect_r = 0 # for LightDark CC-POMDP
+```
 
 
 ### Parallel Usage
@@ -145,6 +155,14 @@ See the following files for more examples:
     - Training [`scripts/train_minex.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/train_minex.jl)
     - Solver [`scripts/solver_minex.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/solver_minex.jl)
     - Representation [`scripts/representation_minex.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/representation_minex.jl)
+- Aircraft Collision Avoidance (CAS) CC-POMDP: https://github.com/sisl/CollisionAvoidancePOMDPs.jl
+    - Training [`scripts/train_cas.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/train_cas.jl)
+    - Solver [`scripts/solver_cas.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/solver_cas.jl)
+    - Representation [`scripts/representation_cas.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/representation_cas.jl)
+- Spillpoint Carbon Storage (CCS) CC-POMDP: https://github.com/sisl/SpillpointPOMDP.jl
+    - Training [`scripts/train_spillpoint.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/train_spillpoint.jl)
+    - Solver [`scripts/solver_spillpoint.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/solver_spillpoint.jl)
+    - Representation [`scripts/representation_spillpoint.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/representation_spillpoint.jl)
 
 
 ## Parameters
@@ -172,8 +190,9 @@ Parameters for the BetaZero algorithm.
     eval_on_accuracy::Bool = false            # If evaluating (i.e., `n_evaluate > 0`), then base comparison on accuracy of the two networks
     bootstrap_q::Bool = false                 # Bootstrap the `init_Q` using the value network when a new (b,a) node is added during MCTS.
 end
+```
 
-
+```julia
 """
 Parameters for neural network surrogate model.
 """
@@ -187,12 +206,13 @@ Parameters for neural network surrogate model.
     training_split::Float64 = 0.8                    # Training / validation split (Default: 80/20)
     sample_more_than_collected::Bool = true          # Sample more data (with replacement) than is in the buffer
     batchsize::Int = 512                             # Batch size
-    learning_rate::Float64 = 1e-3                    # Learning rate for ADAM optimizer during training
+    learning_rate::Union{Float64,LearningRateScheduler} = 1e-3 # Learning rate for ADAM optimizer during training
     λ_regularization::Float64 = 1e-5                 # Parameter for L2-norm regularization
     optimizer = Adam                                 # Training optimizer (e.g., Adam, Descent, Nesterov)
     loss_func::Function = Flux.Losses.mse            # MAE works well for problems with large returns around zero, and spread out otherwise.
     activation::Function = relu                      # Activation function
     layer_size::Int = 64                             # Number of connections in fully connected layers (for CNN, refers to fully connected "head" layers)
+    network_depth::Int = 2                           # Depth of the neural network (not including first layer and heads)
     use_cnn::Bool = false                            # Use convolutional neural network
     use_deepmind_arch::Bool = false                  # Use simplified non-resnet architecture from AlphaZero
     cnn_params::NamedTuple = (filter=(5,5), num_filters=[64, 128], num_dense=[256, 256])
@@ -258,6 +278,15 @@ solver.mcts_solver.final_criterion = MaxZQN(zq=1, zn=1)
 solver.mcts_solver.final_criterion = SampleZQN(τ=0, zq=1, zn=1)
 ```
 
+ConstrainedZero criteria:
+```julia
+# ConstrainedZero: To use the CC-PUCT criteria that is subject to the failure probability threshold, use:
+solver.mcts_solver.final_criterion = SampleZQNS(τ=1, zq=1, zn=1)
+
+# ConstrainedZero: Or for the argmax, use:
+solver.mcts_solver.final_criterion = MaxZQNS(zq=1, zn=1)
+```
+
 
 ## Directory structure
 
@@ -280,6 +309,8 @@ solver.mcts_solver.final_criterion = SampleZQN(τ=0, zq=1, zn=1)
 
 [2] [https://github.com/sisl/RoombaPOMDPs.jl](https://github.com/JuliaPOMDP/MCTS.jl)
 
-## Citation
+## Citations
 
-> Under review.
+> BetaZero: Under review.
+
+> ConstrainedZero: Under review.
