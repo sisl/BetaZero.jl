@@ -326,7 +326,7 @@ end
 Plot holdout and performance metrics over iterations (core for `plot_accuracy` and `plot_returns`).
 """
 function plot_metric(solver::BetaZeroSolver;
-                     metric::Symbol=:accuracies, # :accuracies, :returns, :alpha
+                     metric::Symbol=:accuracies, # :accuracies, :returns, :delta
                      xaxis_simulations=false,
                      xlabel=xaxis_simulations ? "total simulations" : "iteration",
                      ylabel="accuracy",
@@ -340,7 +340,7 @@ function plot_metric(solver::BetaZeroSolver;
                      expert_results=nothing, # [mean, std]
                      expert_label="expert")
 
-    if metric == :accuracies || metric == :alpha
+    if metric == :accuracies || metric == :delta
         if include_holdout
             ho_results = [mean_and_std(getfield(m, metric)) for m in solver.holdout_metrics]
             ho_μ = first.(ho_results)
@@ -351,8 +351,8 @@ function plot_metric(solver::BetaZeroSolver;
         end
         if metric == :accuracies
             pm_x_over_time = accuracy_over_time
-        elseif metric == :alpha
-            pm_x_over_time = alpha_over_time
+        elseif metric == :delta
+            pm_x_over_time = delta_over_time
         end
     elseif metric == :returns
         if include_holdout
@@ -444,13 +444,13 @@ function plot_metric(solver::BetaZeroSolver;
         Plots.hline!([expert_means...], ribbon=expert_stderr, fillalpha=0.2, ls=:dash, lw=1, c=:black, label=expert_label)
     end
 
-    if solver.is_cc && metric ∈ [:accuracies, :alpha]
+    if solver.is_constrained && metric ∈ [:accuracies, :delta]
         if metric == :accuracies
-            x_α0 = 1 - solver.mcts_solver.α0
-        elseif metric == :alpha
-            x_α0 = solver.mcts_solver.α0
+            x_Δ0 = 1 - solver.mcts_solver.Δ0
+        elseif metric == :delta
+            x_Δ0 = solver.mcts_solver.Δ0
         end
-        Plots.hline!([x_α0], label=false, c=:gray, ls=:dot)
+        Plots.hline!([x_Δ0], label=false, c=:gray, ls=:dot)
     end
 
     # Currently running, make x-axis span entire iteration domain
@@ -465,22 +465,22 @@ function plot_metric(solver::BetaZeroSolver;
         ylims!(ylims()[1], 1.01)
     end
 
-    return plot!(legend=:right)
+    return plot!(legend=metric == :returns ? :bottomright : :right)
 end
 
 plot_accuracy(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:accuracies, ylabel="accuracy", kwargs...)
 plot_returns(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:returns, ylabel="returns", kwargs...)
-plot_alphas(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:alpha, ylabel="alphas", kwargs...)
+plot_deltas(solver::BetaZeroSolver; kwargs...) = plot_metric(solver; metric=:delta, ylabel="deltas", kwargs...)
 function plot_accuracy_and_returns(solver::BetaZeroSolver; expert_accuracy=solver.expert_results.expert_accuracy, expert_returns=solver.expert_results.expert_returns, kwargs...)
     plt_accuracy = plot_accuracy(solver; expert_results=expert_accuracy, expert_label=solver.expert_results.expert_label, kwargs...)
     plt_returns = plot_returns(solver; expert_results=expert_returns, expert_label=solver.expert_results.expert_label, kwargs...)
     return plot(plt_accuracy, plt_returns, layout=2, size=(1000,300), margin=8Plots.mm, fontfamily="Computer Modern", framestyle=:box)
 end
-function plot_accuracy_returns_and_alphas(solver::BetaZeroSolver; expert_accuracy=solver.expert_results.expert_accuracy, expert_returns=solver.expert_results.expert_returns, kwargs...)
+function plot_accuracy_returns_and_deltas(solver::BetaZeroSolver; expert_accuracy=solver.expert_results.expert_accuracy, expert_returns=solver.expert_results.expert_returns, kwargs...)
     plt_accuracy = plot_accuracy(solver; expert_results=expert_accuracy, expert_label=solver.expert_results.expert_label, kwargs...)
     plt_returns = plot_returns(solver; expert_results=expert_returns, expert_label=solver.expert_results.expert_label, kwargs...)
-    plt_alphas = plot_alphas(solver; kwargs...)
-    return plot(plt_accuracy, plt_returns, plt_alphas, layout=(1,3), size=(1500,300), margin=8Plots.mm, fontfamily="Computer Modern", framestyle=:box)
+    plt_deltas = plot_deltas(solver; kwargs...)
+    return plot(plt_accuracy, plt_returns, plt_deltas, layout=(1,3), size=(1500,300), margin=8Plots.mm, fontfamily="Computer Modern", framestyle=:box)
 end
 
 

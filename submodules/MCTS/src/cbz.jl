@@ -32,17 +32,18 @@ function POMDPTools.action_info(p::CBZPlanner, s; tree_in_info=false, counts_in_
 
         S = statetype(p.mdp)
         A = actiontype(p.mdp)
+        Δ0 = p.solver.Δ0
         if p.solver.keep_tree && !isnothing(p.tree)
             tree = p.tree
             if haskey(tree.s_lookup, s)
                 snode = tree.s_lookup[s]
             else
-                snode = insert_state_node!(tree, s, p.solver.α0, true)
+                snode = insert_state_node!(tree, s, Δ0, true)
             end
         else
-            tree = CBZTree{S,A}(p.solver.n_iterations)
+            tree = CBZTree{S,A}(p.solver.n_iterations; Δ0)
             p.tree = tree
-            snode = insert_state_node!(tree, s, p.solver.α0, p.solver.check_repeat_state)
+            snode = insert_state_node!(tree, s, Δ0, p.solver.check_repeat_state)
         end
 
         timer = p.solver.timer
@@ -72,26 +73,14 @@ function POMDPTools.action_info(p::CBZPlanner, s; tree_in_info=false, counts_in_
             root_counts = tree.n[root_children_idx]
             root_values = tree.q[root_children_idx]
             root_pfail = tree.f[root_children_idx]
-            root_alpha = tree.α[snode]
-            info[:counts] = Dict(map(i->Pair(root_actions[i], (root_counts[i], root_values[i], root_pfail[i], root_alpha)), eachindex(root_actions)))
+            root_delta = tree.Δ[snode]
+            info[:counts] = Dict(map(i->Pair(root_actions[i], (root_counts[i], root_values[i], root_pfail[i], root_delta, Δ0)), eachindex(root_actions)))
+            info[:qvalues] = tree.q
+            info[:fvalues] = tree.f
         end
-
-        # for sanode in tree.children[snode]
-        #     adaptation!(p, tree, snode, sanode)
-        # end
 
         sanode = select_best(p.solver.final_criterion, tree, snode)
         a = tree.a_labels[sanode] # choose action with highest approximate value
-
-        if DEBUG_VERBOSE
-            for sanode in tree.children[snode]
-                a = tree.a_labels[sanode]
-                @show a
-                @show tree.f[sanode]
-                # @show isfailure(p.mdp, s, a)
-            end
-            println("."^40)
-        end
     catch ex
         a = convert(actiontype(p.mdp), default_action(p.solver.default_action, p.mdp, s, ex))
         info[:exception] = ex
@@ -115,47 +104,46 @@ function simulate(cbz::CBZPlanner, snode::Int, d::Int)
         return 0.0, 0.0
     elseif d == 0
         v = estimate_value(cbz.value_estimate, cbz.mdp, s, d)
-        e = estimate_failure(cbz.failure_estimate, cbz.mdp, s)
-        return v, e # ! TODO: e to p_fail and ep to pp_fail
+        p = estimate_failure(cbz.failure_estimate, cbz.mdp, s)
+        return v, p
     end
-    
-    # tree.total_n[snode] += 1 # ! NOTE.
 
-    a, sanode = action_selection(cbz, tree, snode, s)    
-    q, ep = state_widen!(cbz, tree, sol, sanode, s, a, d)
-    
-    tree.total_n[snode] += 1 # ! NOTE.
+    a, sanode = action_selection(cbz, tree, snode, s)
+    q, p = state_widen!(cbz, tree, sol, sanode, s, a, d)
+
+    tree.total_n[snode] += 1
     tree.n[sanode] += 1
     tree.q[sanode] += (q - tree.q[sanode])/tree.n[sanode]
-    tree.f[sanode] += (ep - tree.f[sanode])/tree.n[sanode]
-    
-    # updatebounds!(tree, snode, sanode)
+    tree.f[sanode] += (p - tree.f[sanode])/tree.n[sanode]
+
     adaptation!(cbz, tree, snode, sanode)
 
-    return q, ep
+    return q, p
 end
 
 
 """
-Adaptation
+Adaptation of target failure probability threshold.
 """
 function adaptation!(cbz::CBZPlanner, tree, snode::Int, sanode::Int)
-    updatebounds!(tree, snode, sanode)
-    η, α0 = cbz.solver.η, cbz.solver.α0
-    lb, ub = tree.flb[snode], tree.fub[snode]
-    err = 𝟙(tree.f[sanode] > tree.α[snode])
-    # @info "Before ($(err == 1)): $(tree.α[snode])"
-    # tree.α[snode] = clamp(tree.α[snode] + η*(err + α0 - 1), lb, ub)
-    # tree.α[snode] = clamp(tree.α[snode] + η*(err + α0 - 1), lb, 1)
-    # @info "Before: $(tree.α[snode])"
-    # @show lb, ub
-    tree.α[snode] = clamp(tree.α[snode] + η*(err - α0), lb, ub)
-    # tree.α[snode] = clamp(tree.α[snode] + η*(err - α0), lb, 1)
-    # tree.α[snode] = tree.α[snode] + η*(err - α0)
-    # @info "After: $(err == 1) and $(tree.α[snode])"
-    # tree.α[snode] = tree.α[snode] + η*(err + α0 - 1)
-    # @info "After ($(err == 1)): $(tree.α[snode])"
-    return tree.α[snode]
+    updatebounds!(tree, snode)
+    Δ0, η = cbz.solver.Δ0, cbz.solver.η
+    lb = tree.flb[snode]
+    ub = tree.fub[snode]
+    err = 𝟙(tree.f[sanode] > tree.Δ[snode])
+    tree.Δ[snode] = clamp(tree.Δ[snode] + η*(err - Δ0), lb, ub)
+    return tree.Δ[snode]
+end
+
+
+"""
+Update failure probability bounds for adaptation.
+"""
+function updatebounds!(tree::CBZTree{S,A}, snode::Int) where {S,A}
+    fb = [tree.f[sanode] for sanode in tree.children[snode]]
+    tree.flb[snode] = minimum(fb)
+    tree.fub[snode] = maximum(fb)
+    return tree.flb[snode], tree.fub[snode]
 end
 
 
@@ -195,11 +183,9 @@ function add_action!(cbz::CBZPlanner, tree, snode::Int, s, a; check_repeat_actio
         sanode = tree.a_lookup[(snode, a)]
     else
         n0 = init_N(sol.init_N, cbz.mdp, s, a)
-        sanode = insert_action_node!(tree, snode, a, n0,
-                                     init_Q(sol.init_Q, cbz.mdp, s, a),
-                                     init_F(sol.init_F, cbz.mdp, s), # ! NOTE.
-                                     check_repeat_action
-                                    )
+        q0 = init_Q(sol.init_Q, cbz.mdp, s, a)
+        f0 = init_F(sol.init_F, cbz.mdp, s, a)
+        sanode = insert_action_node!(tree, snode, a, n0, q0, f0, check_repeat_action)
         tree.total_n[snode] += n0
     end
     adaptation!(cbz, tree, snode, sanode)
@@ -212,18 +198,17 @@ State progressive widening.
 function state_widen!(cbz::CBZPlanner, tree, sol, sanode, s, a, d)
     new_node = false
     if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
-        # sp, r, e = @gen(:sp, :r, :e)(cbz.mdp, s, a, cbz.rng) # TODO.
-        sp, r, _ = gen(cbz.mdp, s, a, cbz.rng)
-        e = isfailure(cbz.mdp, s, a)
+        # sp, r, p = @gen(:sp, :r, :p)(cbz.mdp, s, a, cbz.rng) # TODO.
+        sp, r, p = gen(cbz.mdp, s, a, cbz.rng)
 
         if sol.check_repeat_state && haskey(tree.s_lookup, sp)
             spnode = tree.s_lookup[sp]
         else
-            spnode = insert_state_node!(tree, sp, sol.α0, sol.keep_tree || sol.check_repeat_state)
+            spnode = insert_state_node!(tree, sp, sol.Δ0, sol.keep_tree || sol.check_repeat_state)
             new_node = true
         end
 
-        push!(tree.transitions[sanode], (spnode, r, e))
+        push!(tree.transitions[sanode], (spnode, r, p))
 
         if !sol.check_repeat_state
             tree.n_a_children[sanode] += 1
@@ -232,20 +217,23 @@ function state_widen!(cbz::CBZPlanner, tree, sol, sanode, s, a, d)
             tree.n_a_children[sanode] += 1
         end
     else
-        spnode, r, e = rand(cbz.rng, tree.transitions[sanode])
+        spnode, r, p = rand(cbz.rng, tree.transitions[sanode])
     end
 
     if new_node # if b ∉ 𝒯
-        vp = estimate_value(cbz.value_estimate, cbz.mdp, sp, d-1)
-        ep = estimate_failure(cbz.failure_estimate, cbz.mdp, sp)
+        v′ = estimate_value(cbz.value_estimate, cbz.mdp, sp, d-1)
+        p′ = estimate_failure(cbz.failure_estimate, cbz.mdp, sp)
     else
-        vp, ep = simulate(cbz, spnode, d-1)
+        v′, p′ = simulate(cbz, spnode, d-1)
     end
-    γ = discount(cbz.mdp)
-    q = r + γ*vp
-    e = (e + ep) / 2
 
-    return q, e
+    γ = discount(cbz.mdp)
+    q = r + γ*v′
+
+    δ = sol.δ
+    p = (1-δ)*p + δ*(1-p)*p′
+
+    return q, p
 end
 
 
@@ -255,53 +243,43 @@ Return the best action node based on the SPUCT score with exploration constant c
 function best_sanode_SPUCT(cbz::CBZPlanner, tree::CBZTree, snode::Int, s)
     mdp, sol = cbz.mdp, cbz.solver
     c = sol.exploration_constant
-    p = estimate_policy(cbz.policy_estimate, mdp, s)
+    Δ0 = tree.Δ0
+    Δ′ = max(Δ0, tree.Δ[snode])
+    𝐩 = estimate_policy(cbz.policy_estimate, mdp, s)
 
-    num_equal_values = 1
     best_SPUCT = -Inf
     sanode = 0
+
     Ns = sum(tree.total_n[snode])
-    no_safe_actions = all(tree.f[child] > tree.α[snode] for child in tree.children[snode])
     children = tree.children[snode]
+    no_safe_actions = all(tree.f[child] > Δ′ for child in children)
 
     for child in children
         n = tree.n[child]
         q = tree.q[child]
+        f = tree.f[child]
         if (Ns <= 0 && n == 0) || c == 0.0
             SPUCT = q
         else
             q = normalize01(q, tree.q; checkisnan=true)
             a = tree.a_labels[child]
             ai = findfirst(map(ab->a == ab, actions(mdp)))
-            pa = p[ai]
-            if no_safe_actions
-                # Sba = 1 # ! NOTE
-                Sba = 1 - tree.f[child]
-                # Sba = tree.α[snode] - tree.f[child]
-            else
-                # Sba = 𝟙(tree.f[child] ≤ tree.α[snode]) * (1 - tree.f[child]) # ! NOTE.
-                # Sba = 𝟙(tree.f[child] ≤ tree.α[snode]) * (tree.α[snode] - tree.f[child]) # ! NOTE.
+            pa = 𝐩[ai]
 
-                Sba = 𝟙(tree.f[child] ≤ tree.α[snode]) * (1 - tree.f[child]) # ! NOTE.
-                # Sba = 𝟙(tree.f[child] ≤ tree.α[snode])
+            if no_safe_actions
+                subject_to = 1
+            else
+                subject_to = 𝟙(f ≤ Δ′)
             end
-            # SPUCT = q + c*pa*sqrt(Ns)/(n+1) # ! NOTE.
-            SPUCT = Sba*(q + c*pa*sqrt(Ns)/(n+1))
+
+            SPUCT = subject_to * (q + c*pa*sqrt(Ns)/(n+1))
         end
-        @assert !isnan(SPUCT) "SPUCT was NaN (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n, Sba=$Sba)"
+        @assert !isnan(SPUCT) "SPUCT was NaN (q=$q, pa=$pa, c=$c, Ns=$Ns, n=$n, sba=$sba)"
         @assert !isequal(SPUCT, -Inf)
-        if SPUCT ≈ best_SPUCT
-            # Count identical values
-            num_equal_values += 1
-        elseif SPUCT > best_SPUCT
-        # if SPUCT > best_SPUCT
+        if SPUCT > best_SPUCT
             best_SPUCT = SPUCT
             sanode = child
         end
-    end
-    if length(children) > 1 && num_equal_values == length(children)
-        # randomly pick action if their SPUCT are all equal
-        sanode = rand(children)
     end
     return sanode
 end

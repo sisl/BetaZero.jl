@@ -20,8 +20,14 @@ Load policy from file (MCTS planner and surrogate objects together).
 """
 function load_policy(filename::String)
     BSON.@load "$filename" policy
+    return localize_policy(policy)
+end
 
-    # Handle anonymous function serialization issues
+
+"""
+Handle anonymous function serialization issues
+"""
+function localize_policy(policy::BetaZeroPolicy)
     network = policy.surrogate
     normalize_input = policy.parameters.nn_params.normalize_input
     normalize_output = policy.parameters.nn_params.normalize_output
@@ -39,13 +45,15 @@ function load_policy(filename::String)
         vhf = network.layers[end].layers.value_head.layers[end]
         mean_y = hasproperty(vhf.mean_y, :contents) ? vhf.mean_y.contents : vhf.mean_y
         std_y = hasproperty(vhf.std_y, :contents) ? vhf.std_y.contents : vhf.std_y
+
         unnormalize_y = y -> (y .* std_y) .+ mean_y
 
         heads = network.layers[end]
         value_head = heads.layers.value_head
         value_head = Chain(value_head.layers[1:end-1]..., unnormalize_y) # NOTE end-1 to remove it first.
         policy_head = heads.layers.policy_head
-        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+        pfail_head = heads.layers.pfail_head
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head, pfail_head=pfail_head)
     end
 
     if normalize_input
@@ -143,13 +151,15 @@ function load_incremental(filename::String)
         vhf = network.layers[end].layers.value_head.layers[end]
         mean_y = vhf.mean_y.contents
         std_y = vhf.std_y.contents
+
         unnormalize_y = y -> (y .* std_y) .+ mean_y
 
         heads = network.layers[end]
         value_head = heads.layers.value_head
         value_head = Chain(value_head.layers[1:end-1]..., unnormalize_y) # NOTE end-1 to remove it first.
         policy_head = heads.layers.policy_head
-        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head)
+        pfail_head = heads.layers.pfail_head
+        heads = Parallel(heads.connection, value_head=value_head, policy_head=policy_head, pfail_head=pfail_head)
     end
 
     if normalize_input

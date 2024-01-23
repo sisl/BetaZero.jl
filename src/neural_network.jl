@@ -1,8 +1,12 @@
+
 """
 Initialize policy & value network with random weights.
 """
-initialize_network(solver::BetaZeroSolver) = initialize_network(solver.nn_params)
-function initialize_network(nn_params::BetaZeroNetworkParameters)
+initialize_network(solver::BetaZeroSolver; kwargs...) = initialize_network(solver.nn_params; kwargs...)
+function initialize_network(nn_params::BetaZeroNetworkParameters; seed=0)
+    Flux.CUDA.seed!(seed) # Reproducibility
+    Random.seed!(seed) # Reproducibility
+
     input_size = nn_params.input_size
     action_size = nn_params.action_size
     activation = nn_params.activation
@@ -13,7 +17,6 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
     p_dropout = nn_params.p_dropout
     use_batchnorm = nn_params.use_batchnorm
     batchnorm_momentum = nn_params.batchnorm_momentum
-    # use_order_invariant_layer = true # ! TODO: Parameterize
 
     function DenseRegularizedLayer(in_out::Pair)
         input, output = in_out
@@ -76,7 +79,7 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
                         Flux.flatten,
                         Dense(out_conv_size_value => ℓs, relu),
                         Dense(ℓs => 1),
-                        sigmoid,
+                        sigmoid
                     ),
                 )
             )
@@ -102,7 +105,7 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
                     pfail_head = Chain(
                         DenseRegularizedLayer(num_dense2 => ℓs)...,
                         Dense(ℓs => 1),
-                        sigmoid,
+                        sigmoid
                     )
                 )
             )
@@ -112,8 +115,6 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
         return Chain(
             DenseRegularizedLayer(prod(input_size) => ℓs)...,
             collect(Iterators.flatten([DenseRegularizedLayer(ℓs => ℓs) for _ in 1:network_depth]))...,
-            # use_order_invariant_layer ? x -> mean(x; dims=2) : x -> x, # ! NOTE.
-            # use_order_invariant_layer ? x -> sum(x; dims=1) : x -> x, # ! NOTE.
             Parallel(vcat,
                 value_head = Chain(
                     DenseRegularizedLayer(ℓs => ℓs)...,
@@ -128,7 +129,7 @@ function initialize_network(nn_params::BetaZeroNetworkParameters)
                 pfail_head = Chain(
                     DenseRegularizedLayer(ℓs => ℓs)...,
                     Dense(ℓs => 1),
-                    sigmoid,
+                    sigmoid
                 )
             )
         )
@@ -143,10 +144,13 @@ calc_loss_weight(action_size::Int) = Float32(round(1 - 1/action_size; digits=2))
 """
 Train policy & value neural network `f` using the latest `data` generated from online tree search (MCTS).
 """
-function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing, ϵ_std::Float32=1f-10, rstats::RunningStats=RunningStats(), use_running_stats::Bool=true)
+function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=nothing, ϵ_std::Float32=1f-10, rstats::Union{RunningStats,RunningStatsBounds}=RunningStats(), use_running_stats::Bool=true, iteration::Int=1, seed=0)
+    Random.seed!(seed) # Reproducibility
+    Flux.CUDA.seed!(seed) # Reproducibility
+
     nn_params = solver.nn_params
     device = nn_params.device
-    lr = nn_params.learning_rate
+    lr = get_learning_rate(nn_params.learning_rate, iteration)
     λ = nn_params.λ_regularization
     loss_str = string(nn_params.loss_func)
     normalize_input = nn_params.normalize_input
@@ -154,7 +158,10 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     sample_more_than_collected = nn_params.sample_more_than_collected
     value_loss_weight = nn_params.value_loss_weight
     use_kl_loss = nn_params.use_kl_loss
+    action_size = nn_params.action_size
     key = (lr, λ, loss_str, normalize_input, normalize_output)
+
+    verbose && @info "Learning rate of $lr"
 
     n_train = Int(nn_params.n_samples ÷ (1/nn_params.training_split))
     n_valid = nn_params.n_samples - n_train
@@ -168,30 +175,52 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     n_train = size(y_train)[end]
     n_valid = size(y_valid)[end]
 
-    normalize_func(x, μ, σ) = (x .- μ) ./ (σ .+ ϵ_std)
+    # TODO: Parameterize.
+    input_normalize_func(x, μ, σ) = (x .- μ) ./ (σ .+ ϵ_std)
 
     # Normalize input values close to the range of [-1, 1]
     if normalize_input
         # Normalize only based on the training data (but apply it to training and validation data)
         mean_x = mean(x_train, dims=ndims(x_train))
         std_x = std(x_train, dims=ndims(x_train))
-        x_train = normalize_func(x_train, mean_x, std_x)
-        x_valid = normalize_func(x_valid, mean_x, std_x)
+        x_train = input_normalize_func(x_train, mean_x, std_x)
+        x_valid = input_normalize_func(x_valid, mean_x, std_x)
     end
 
-    # Normalize target values close to the range of [-1, 1]
+    output_standard_normalization = isa(rstats, RunningStats) # Standard normal
+
     if normalize_output
-        # Normalize only based on the training data (but apply it to training and validation data)
-        if use_running_stats
-            # Keep track of all y-data to get better mean/std across entire sets of training data (running mean/std)
-            map(y->push!(rstats, y), y_train[1,:])
-            mean_y = mean(rstats)
-            std_y = std(rstats)
+        if output_standard_normalization
+            # Normalize target values close to the range of [-1, 1]
+            output_normalize_func = (x, μ, σ) -> (x .- μ) ./ (σ .+ ϵ_std)
+
+            # Normalize only based on the training data (but apply it to training and validation data)
+            if use_running_stats
+                # Keep track of all y-data to get better mean/std across entire sets of training data (running mean/std)
+                map(y->push!(rstats, y), y_train[1,:])
+                mean_y = mean(rstats)
+                std_y = std(rstats)
+            else
+                mean_y, std_y = mean_and_std(y_train[1,:])
+            end
+            y_train[1,:] = output_normalize_func(y_train[1,:], mean_y, std_y)
+            y_valid[1,:] = output_normalize_func(y_valid[1,:], mean_y, std_y)
         else
-            mean_y, std_y = mean_and_std(y_train[1,:])
+            # Normalize target values to the range of [0, 1]
+            output_normalize_func = (x, mn, mx) -> normalize01(x, mn, mx)
+
+            # Normalize only based on the training data (but apply it to training and validation data)
+            if use_running_stats
+                # Keep track of all y-data to get better mean/std across entire sets of training data (running mean/std)
+                map(y->push!(rstats, y), y_train[1,:])
+                mn_y = minimum(rstats)
+                mx_y = maximum(rstats)
+            else
+                mn_y, mx_y = minimum(y_train[1,:]), maximum(y_train[1,:])
+            end
+            y_train[1,:] = output_normalize_func(y_train[1,:], mn_y, mx_y)
+            y_valid[1,:] = output_normalize_func(y_valid[1,:], mn_y, mx_y)
         end
-        y_train[1,:] = normalize_func(y_train[1,:], mean_y, std_y)
-        y_valid[1,:] = normalize_func(y_valid[1,:], mean_y, std_y)
     end
 
     verbose && @info "Data set size: $(n_train):$(n_valid) (training:validation)"
@@ -231,7 +260,6 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     penalty() = λ*sum(sqnorm, Flux.params(f))
     sign_accuracy(x, y) = mean(sign.(f(x)[1,:]) .== sign.(y[1,:]))
 
-
     verbose && @info "Using value weight of: $value_loss_weight"
 
     loss(x, y; w=value_loss_weight, info=Dict()) = begin
@@ -247,13 +275,17 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
         π = pmask .* y # true policy vector
         c = umask .* y # true failure indicator
 
-        value_loss = nn_params.loss_func(v, z)
+        wv = 1f0
+        wp = 1f0
+        wf = 1f0
+
+        value_loss = wv*nn_params.loss_func(v, z)
         if use_kl_loss
-            policy_loss = Flux.Losses.kldivergence(𝐩, π)
+            policy_loss = wp*Flux.Losses.kldivergence(𝐩, π)
         else
-            policy_loss = Flux.Losses.crossentropy(𝐩, π)
+            policy_loss = wp*Flux.Losses.crossentropy(𝐩, π)
         end
-        failure_loss = Flux.Losses.binarycrossentropy(u, c) # TODO: (1-w) weighting
+        failure_loss = wf*Flux.Losses.binarycrossentropy(u, c)
         regularization = penalty()
 
         ignore_derivatives() do
@@ -447,7 +479,11 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
 
     if normalize_output
         # Add un-normalization output layer
-        unnormalize_y = y -> (y .* std_y) .+ mean_y
+        if output_standard_normalization
+            unnormalize_y = y -> (y .* std_y) .+ mean_y
+        else
+            unnormalize_y = y -> y .* (mx_y - mn_y) .+ mn_y
+        end
         heads = f.layers[end]
         value_head = heads.layers.value_head
         value_head = Chain(value_head.layers..., unnormalize_y)
@@ -533,7 +569,7 @@ function logging_fn(epoch, loss_train, loss_train_value, loss_train_policy, loss
     acc_train = rpad(round(acc_train; sigdigits), sigdigits+2, '0')
     acc_valid = rpad(round(acc_valid; sigdigits), sigdigits+2, '0')
 
-    columns = ["Epoch", "Loss Train", "Loss Val.", "Acc. Train", "Acc. Val.", "Extra"] 
+    columns = ["Epoch", "Loss Train", "Loss Val.", "Acc. Train", "Acc. Val.", "Extra"]
     log = [epoch join([loss_train, "Vθ = $loss_train_value", "Pθ = $loss_train_policy", "Fθ = $loss_train_failure"], "\n") join([loss_valid, "Vθ = $loss_valid_value", "Pθ = $loss_valid_policy", "Fθ = $loss_valid_failure"], "\n") acc_train acc_valid extra]
 
     pretty_table(DataFrame(log, columns); linebreaks=true)

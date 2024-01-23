@@ -40,3 +40,6 @@ function normalize01(x, X; checkisnan=false)
     end
 end
 normalize01(X; kwargs...) = map(x->normalize01(x, X; kwargs...), X)
+
+bounds_quantile(lb, ub, Δ) = quantile([lb, ub], Δ)
+bounds_quantile(F, Δ) = quantile(F, Δ)

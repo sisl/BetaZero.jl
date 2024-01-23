@@ -129,4 +129,88 @@ function policy_lookup(policy::RawValueNetworkPolicy, b)
     return Q
 end
 
-POMDPTools.action_info(policy::RawValueNetworkPolicy, b) = action(policy, b; include_info=true)
+
+@with_kw mutable struct RawPfailNetworkPolicy <: Policy
+    mdp::MDP
+    surrogate::Surrogate
+    n_obs::Int = 1 # Number of observations per action to branch (equal to number of belief updates)
+    δ::Real = 0.5
+end
+
+RawPfailNetworkPolicy(mdp::MDP, surrogate::Surrogate) = RawPfailNetworkPolicy(mdp=mdp, surrogate=surrogate)
+
+
+function POMDPs.action(policy::RawPfailNetworkPolicy, s; include_info::Bool=false, counts_in_info::Bool=true, tree_in_info::Bool=true, run_parallel::Bool=false)
+    estimate_value = 0
+    estimate_failure::Function = sp->pfail_lookup(policy.surrogate, sp) # Leaf node p(fail) estimator
+    mdp = policy.mdp
+    rng = Random.GLOBAL_RNG # TODO; parameterize
+    tree = Dict()
+    counts = Dict()
+    info = Dict()
+    λ_lcb = 1.0
+
+    for a in actions(mdp, s)
+        tree[a] = (sp=[], q=[], f=[])
+        qvalues = []
+        fvalues = []
+        # TODO: threads instead
+        if run_parallel
+            results = pmap(_->begin
+                sp, r = @gen(:sp, :r)(mdp, s, a, rng)
+                p = MCTS.isfailure(mdp, s, a)
+                q = r + discount(mdp)*estimate_value
+                δ = policy.δ
+                p′ = estimate_failure(sp)
+                f = (1-δ)*p + δ*(1-p)*p′
+                (sp, q, f)
+            end, 1:policy.n_obs)
+
+            for (sp,q,f) in results
+                push!(tree[a].sp, sp)
+                push!(tree[a].q, q)
+                push!(tree[a].f, f)
+                push!(qvalues, q)
+                push!(fvalues, f)
+            end
+        else
+            for _ in 1:policy.n_obs
+                sp, r = @gen(:sp, :r)(mdp, s, a, rng)
+                p = MCTS.isfailure(mdp, s, a)
+                q = r + discount(mdp)*estimate_value
+                δ = policy.δ
+                p′ = estimate_failure(sp)
+                f = (1-δ)*p + δ*(1-p)*p′
+                push!(tree[a].sp, sp)
+                push!(tree[a].q, q)
+                push!(tree[a].f, f)
+                push!(qvalues, q)
+                push!(fvalues, f)
+            end
+        end
+
+        count = policy.n_obs
+        μ, σ = mean_and_std(fvalues)
+        counts[a] = (count, μ, μ - λ_lcb*σ)
+    end
+
+    # select action based on maximum average Q-value
+    best_a = reduce((a,a′) -> mean(tree[a].f) ≤ mean(tree[a′].f) ? a : a′, keys(tree))
+
+    if include_info
+        if counts_in_info # TODO: p.solver.counts_in_info ||
+            info[:counts] = counts
+        end
+
+        if tree_in_info # TODO: p.solver.tree_in_info ||
+            info[:tree] = tree
+        end
+
+        return (best_a, info)
+    else
+        return best_a
+    end
+end
+
+
+POMDPTools.action_info(policy::Union{RawValueNetworkPolicy,RawPfailNetworkPolicy}, b) = action(policy, b; include_info=true)

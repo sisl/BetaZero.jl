@@ -4,20 +4,23 @@ abstract type Criteria end
 """
 Extract either `qvalues` (Q), `counts` (N), or `safety` (S) from the tree.
 """
-function extract_info(tree, snode::Int; counts=false, qvalues=false, safety=false, kwargs...)
+function extract_info(tree, snode::Int; counts=false, qvalues=false, safety=false, full_qvalues=false, full_safety=false, kwargs...)
     m = length(tree.children[snode])
     D = Dict()
 
     counts && (D[:N] = Vector{Float64}(undef, m))
     qvalues && (D[:Q] = Vector{Float64}(undef, m))
+    full_qvalues && (D[:Qtree] = tree.q)
+    full_safety && (D[:Ftree] = tree.f)
     safety && (D[:F] = Vector{Float64}(undef, m))
-    safety && (D[:α] = Vector{Float64}(undef, m))
+    safety && (D[:Δ] = Vector{Float64}(undef, m))
+    safety && (D[:Δ0] = tree.Δ0)
 
     for (i,child) in enumerate(tree.children[snode])
         counts && (D[:N][i] = tree.n[child]) # N(b,a)
         qvalues && (D[:Q][i] = tree.q[child]) # Q(b,a)
         safety && (D[:F][i] = tree.f[child]) # F(b,a)
-        safety && (D[:α][i] = tree.α[snode]) # α(b)
+        safety && (D[:Δ][i] = tree.Δ[snode]) # Δ(b)
     end
 
     return NamedTuple{(collect(keys(D))...,)}((collect(values(D))...,))
@@ -29,7 +32,6 @@ Given a criteria, extract Q, N, of S info based on `kwargs` and then call the di
 """
 probability_vector(crit::Criteria, tree, snode; kwargs...) = probability_vector(crit, extract_info(tree, snode; kwargs...))
 
-global DEBUG_VERBOSE = false
 
 """
 General `select_best` via maximum for a given vector `P`.
@@ -37,19 +39,12 @@ General `select_best` via maximum for a given vector `P`.
 function select_best(P::Vector, tree, snode)
     best = -Inf
     sanode = 0
-    a_best = nothing # ! NOTE
-    DEBUG_VERBOSE && println("="^40)
     for (i,child) in enumerate(tree.children[snode])
-        a = tree.a_labels[child] # ! NOTE
-        DEBUG_VERBOSE && @show a, P[i]
         if P[i] > best
             best = P[i]
             sanode = child
-            a_best = a
         end
     end
-    DEBUG_VERBOSE && @show a_best
-    DEBUG_VERBOSE && println("="^40)
     return sanode
 end
 
@@ -210,7 +205,7 @@ function probability_vector(crit::SampleZQN, info::NamedTuple)
     τ = crit.τ
     zq = crit.zq
     zn = crit.zn
-    Nnorm = (N ./ sum(N))
+    Nnorm = N ./ sum(N)
     QN = (softmax(Q).^zq .* Nnorm.^zn) .^ (1/τ)
     if all(QN .== 0) || all(isnan.(QN))
         QN = ones(length(QN))
@@ -233,91 +228,42 @@ Return the best action using information from Q-values, visit counts and safety.
     zq = 1
     zn = 1
 end
-select_best(crit::MaxZQNS, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true, counts=true, safety=true), tree, snode)
-probability_vector(crit::MaxZQNS, info::NamedTuple) = probability_vector(SampleZQNS(τ=1, zq=crit.zq, zn=crit.zn), info)
+select_best(crit::MaxZQNS, tree, snode::Int) = select_best(probability_vector(crit, tree, snode; qvalues=true, counts=true, safety=true, full_qvalues=true, full_safety=true), tree, snode)
+probability_vector(::MaxZQNS, info::NamedTuple) = probability_vector(SampleZQNS(τ=1), info)
 
-sigmoid(z::Vector) = 1.0 ./ (1.0 .+ exp.(-z)) # ! TODO.
+sigmoid(z::Vector) = 1.0 ./ (1.0 .+ exp.(-z))
+prob_normalize(X::Vector) = X ./ sum(X)
+normalizeAB(X, a, b) = (X .- minimum(X)) / (maximum(X) - minimum(X)) * (b - a) .+ a
 
 @with_kw mutable struct SampleZQNS <: Criteria
     τ = 1
-    # zs = 1 # ! TODO
     zq = 1
     zn = 1
 end
-select_best(crit::SampleZQNS, tree, snode::Int) = select_best_with_temp(crit, MaxZQNS(zq=crit.zq, zn=crit.zn), tree, snode; qvalues=true, counts=true, safety=true)
+select_best(crit::SampleZQNS, tree, snode::Int) = select_best_with_temp(crit, MaxZQNS(zq=crit.zq, zn=crit.zn), tree, snode; qvalues=true, counts=true, safety=true, full_qvalues=true, full_safety=true)
 function probability_vector(crit::SampleZQNS, info)
-    Q, N, F, α = info.Q, info.N, info.F, info.α
-    no_safe_actions = all(F .> α)
-    if no_safe_actions
-        # If this is hit, failure is inevitable.
-        S = ones(length(F)) # 1 .- F
-        # S = 1 .- F # ! NOTE
-        # S = α .- F # ! NOTE
-        # S = ones(length(F))
-        # @info "No safe actions."
-    else
-        # S = (1 .- F) # ! NOTE (used this to get semi-good behavior)
-        S = 𝟙.(F .≤ α) .* (1 .- F) # ! NOTE
-        # S = 𝟙.(F .≤ α) .* (α .- F) # ! NOTE
-        # S = 𝟙.(F .≤ α)
-    end
-
-    DEBUG_VERBOSE && @show F
-    DEBUG_VERBOSE && @show α
-    DEBUG_VERBOSE && @show α .- F
-
-    # @show S
-    # @show N
+    Q, N, F, Δ, Δ0 = info.Q, info.N, info.F, info.Δ, info.Δ0
+    Qtree, Ftree = info.Qtree, info.Ftree
     τ = crit.τ
-    # zs = crit.zs # ! TODO
-    zs = 1
     zq = crit.zq
     zn = crit.zn
-    Nnorm = N ./ sum(N)
+    Δ′ = max.(Δ0, Δ)
 
-    # if all(S .== 0)
-    #     # All zeros, removing safety constraint (should never really happen based on the NN unlikely to output exactly zero)
-    #     S = ones(length(S))
-    # end
+    # no safe actions
+    if all(F .> Δ′)
+        subject_to = ones(length(F))
+    else
+        subject_to = 𝟙.(F .≤ Δ′)
+    end
 
-    Qnorm = sigmoid(Q) ./ sum(sigmoid(Q))
-    # Qnorm = softmax(Q) # ! NOTE.
-    # Qnorm = softmax(Q) # ! NOTE.
-    # Qnorm = Q # ! NOTE.
-
-    Snorm = S ./ sum(S)
-    # Snorm = softmax(S)
-    # Snorm = S # ! NOTE.
-
-    # SQN = (Snorm.^zs .* Qnorm.^zq .* Nnorm.^zn) .^ (1/τ)
-    # SQN = Snorm .* (Qnorm.^zq .* Nnorm.^zn) .^ (1/τ) # ! NOTE.
-    # SQN = (Qnorm.^zq .* Nnorm.^zn) .^ (1/τ) # ! NOTE.
-    # SQN = (Snorm.^zs .* Qnorm.^zq) .^ (1/τ) # ! NOTE
-    SQN = (Snorm .* Qnorm) .^ (1/τ) # ! NOTE
+    Qnorm = softmax(Q)
+    Nnorm = prob_normalize(N)
+    SQN = subject_to .* (Qnorm.^zq .* Nnorm.^zn).^(1/τ)
 
     if all(SQN .== 0) || all(isnan.(SQN))
         SQN = ones(length(SQN))
     end
+
     P = normalize(SQN, 1)
-
-    DEBUG_VERBOSE && @show S
-    DEBUG_VERBOSE && @show Snorm
-
-    DEBUG_VERBOSE && @show Q
-    DEBUG_VERBOSE && @show Qnorm
-
-    DEBUG_VERBOSE && @show N
-    DEBUG_VERBOSE && @show Nnorm
-
-    DEBUG_VERBOSE && @show SQN
-
-    DEBUG_VERBOSE && @show P
-    DEBUG_VERBOSE && println("—"^40)
-
-    if allequal(P)
-        # break ties randomly
-        P = zeros(length(P))
-        P[rand(eachindex(P))] = 1
-    end
     return P
 end

@@ -85,6 +85,8 @@ function POMDPs.reward(p::LightDarkPOMDP, s::LightDarkState, a::Int)
         else
             return p.incorrect_r
         end
+    elseif s.t ≥ p.max_time
+        return p.incorrect_r
     else
         return -p.movement_cost
     end

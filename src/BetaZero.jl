@@ -31,12 +31,14 @@ using PrettyTables
 using ProgressMeter
 using Suppressor
 using UnicodePlots
+import LogExpFunctions: logit
 import Flux.Zygote: ignore_derivatives
 
 
 include("belief_mdp.jl")
 include("belief_ccmdp.jl")
 include("interface.jl")
+include("scheduler.jl")
 include("parameters.jl")
 include("running_stats.jl")
 
@@ -50,7 +52,9 @@ export
     BeliefCCMDP,
     RawNetworkPolicy,
     RawValueNetworkPolicy,
+    RawPfailNetworkPolicy,
     Surrogate,
+    LearningRateScheduler,
     initialize_network,
     calc_loss_weight,
     value_plot,
@@ -72,6 +76,7 @@ export
     load_solver,
     load_surrogate,
     load_incremental,
+    localize_policy,
     mean_and_stderr,
     solve_planner!,
     network_input,
@@ -102,10 +107,10 @@ mean_belief_reward′(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a, sp) for
     data_buffer_valid::CircularBuffer = CircularBuffer(params.n_buffer) # Simulation data buffer for validation (Note: Making sure to clearly separate training from validation to prevent data leakage)
     bmdp::Union{BeliefMDP,BeliefCCMDP,Nothing} = nothing # Belief-MDP version of the POMDP
     belief_reward::Function = mean_belief_reward
-    is_cc::Bool = false # whether to use a chance-constrained belief MDP
+    is_constrained::Bool = false # ConstrainedZero: whether to use a chance-constrained belief MDP
     include_info::Bool = false # Include `action_info` in metrics when running POMDP simulation
     mcts_solver::AbstractMCTSSolver = begin
-        if is_cc
+        if is_constrained
             CBZSolver(n_iterations=100,
                       check_repeat_action=true,
                       exploration_constant=1.0,
@@ -116,7 +121,7 @@ mean_belief_reward′(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a, sp) for
                       tree_in_info=false,
                       counts_in_info=true, # Note, required for policy vector.
                       show_progress=false,
-                      final_criterion=MaxZQNS(zq=1, zn=1), # safety/constrained version
+                      final_criterion=MaxZQNS(), # safety/constrained version
                       estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a surrogate lookup
         else
             PUCTSolver(n_iterations=100,
@@ -133,6 +138,7 @@ mean_belief_reward′(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a, sp) for
                        estimate_value=(bmdp,b,d)->0.0) # `estimate_value` will be replaced with a surrogate lookup
         end
     end
+    best_so_far::BestSoFar = BestSoFar()
     data_collection_policy::Policy = RandomPolicy(Random.GLOBAL_RNG, pomdp, updater) # Policy used for data collection (if indicated to use different policy than the BetaZero on-policy)
     use_data_collection_policy::Bool = false # Use provided policy for data collection.
     collect_metrics::Bool = true # Indicate that performance metrics should be collected.
@@ -176,12 +182,11 @@ include("neural_network.jl") # Needs BetaZeroPolicy and RunningStats
 include("raw_network.jl") # Needs Surrogate defined.
 include("saving.jl") # Needs BetaZeroSolver and BetaZeroPolicy defined.
 include("plots.jl")
-include("failure_probability.jl")
 
 """
 The main BetaZero policy iteration algorithm.
 """
-function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate=solver.params.use_nn ? initialize_network(solver) : initialize_gaussian_process(solver), resume::Bool=false)
+function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; seed=0, surrogate::Surrogate=solver.params.use_nn ? initialize_network(solver; seed) : initialize_gaussian_process(solver), resume::Bool=false, plot_callback=(solver, pomdp, up, policy)->nothing)
     local current_surrogate = surrogate
     local best_surrogate = surrogate
     rstats = RunningStats()
@@ -209,11 +214,16 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate
         # x) Store generated data from the best surrogate.
         store_data!(solver, data)
         store_metrics!(solver, metrics)
-        display(plot_predicted_failure(pomdp, current_surrogate)) # TODO: remove
+        update_best_so_far!(solver, best_surrogate, metrics)
+
+        # Intermediate policy plot callback
+        local_policy = solve_planner!(solver, best_surrogate)
+        plt = plot_callback(solver, pomdp, solver.updater, local_policy)
+        !isnothing(plt) && display(plt)
 
         # x) Optimize surrogate with recent simulated data.
         if i != solver.params.n_iterations
-            current_surrogate = train(deepcopy(best_surrogate), solver; rstats, verbose=solver.verbose)
+            current_surrogate = train(deepcopy(best_surrogate), solver; rstats, verbose=solver.verbose, iteration=i, seed=i)
         end
 
         # Save off incremental policy
@@ -226,7 +236,7 @@ end
 
 
 function get_bmdp(solver::BetaZeroSolver, up::Updater)
-    if solver.is_cc
+    if solver.is_constrained
         return BeliefCCMDP(solver.pomdp, up, solver.belief_reward, MCTS.isfailure)
     else
         return BeliefMDP(solver.pomdp, up, solver.belief_reward)
@@ -291,7 +301,7 @@ function attach_surrogate!(mcts_solver, nn_params::BetaZeroNetworkParameters, f:
         mcts_solver.estimate_value=(bmdp,b,d)->value_lookup(f, b)
         mcts_solver.estimate_policy=(bmdp,b)->policy_lookup(f, b)
         mcts_solver.estimate_failure=(bmdp,b)->pfail_lookup(f, b)
-        mcts_solver.init_F=(bmdp,b)->pfail_lookup(f, b)
+        mcts_solver.init_F=(bmdp,b,a)->MCTS.isfailure(bmdp, b, a)
         mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
     else
         mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(f, b)
@@ -383,8 +393,8 @@ function store_metrics!(solver::BetaZeroSolver, metrics)
 
     # Plot incremental learning
     if solver.plot_incremental_data_gen
-        if solver.is_cc
-            performance_plot = plot_accuracy_returns_and_alphas(solver; include_holdout=solver.plot_incremental_holdout)
+        if solver.is_constrained
+            performance_plot = plot_accuracy_returns_and_deltas(solver; include_holdout=solver.plot_incremental_holdout)
         else
             performance_plot = plot_accuracy_and_returns(solver; include_holdout=solver.plot_incremental_holdout)
         end
@@ -460,9 +470,7 @@ function generate_data(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate;
         next!(progress)
     end
 
-    # pmap_batch_size = 1 # ! TODO: Parameterize
-
-    @info "Seed test: $(parse(Int, string(outer_iter, lpad(1, length(digits(inner_iter)), '0'))))"
+    solver.verbose && @info "Seed test: $(parse(Int, string(outer_iter, lpad(1, length(digits(inner_iter)), '0'))))"
 
     @time parallel_data = pmap(i->begin
         seed = parse(Int, string(outer_iter, lpad(i, length(digits(inner_iter)), '0'))) # 1001, 1002, etc. for BetaZero outer_iter=1
@@ -615,7 +623,8 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
     beliefs::Vector = []
     states::Vector = [s0]
     actions::Vector = []
-    alphas::Vector = []
+    deltas::Vector = []
+    Δ0 = missing
 
     include_info && push!(beliefs, b0)
     max_reached = false
@@ -642,18 +651,27 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
         end
         P = ϵ * ones(length(action_space))
         if !isnothing(info)
+            qvalues = []
+            fvalues = []
             if haskey(info, :counts)
                 counts::Dict = info[:counts]
                 root_actions = collect(keys(counts))
-                root_counts_values_pfail_alpha = collect(values(counts))
-                root_counts = map(root->root[1], root_counts_values_pfail_alpha)
-                root_values = map(root->root[2], root_counts_values_pfail_alpha)
-                if length(root_counts_values_pfail_alpha[1]) > 2
-                    root_pfail = map(root->root[3], root_counts_values_pfail_alpha)
-                    root_alpha = map(root->root[4], root_counts_values_pfail_alpha)
+                root_counts_values_pfail_delta = collect(values(counts))
+                root_counts = map(root->root[1], root_counts_values_pfail_delta)
+                root_values = map(root->root[2], root_counts_values_pfail_delta)
+                if length(root_counts_values_pfail_delta[1]) > 2
+                    root_pfail = map(root->root[3], root_counts_values_pfail_delta)
+                    root_delta = map(root->root[4], root_counts_values_pfail_delta)
+                    Δ0 = root_counts_values_pfail_delta[1][5] # all the same
                 else
                     root_pfail = []
-                    root_alpha = []
+                    root_delta = []
+                end
+                if haskey(info, :qvalues)
+                    qvalues = info[:qvalues]
+                end
+                if haskey(info, :fvalues)
+                    fvalues = info[:fvalues]
                 end
             elseif haskey(info, :completed_policy)
                 completed_policy = info[:completed_policy]
@@ -664,22 +682,22 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                 root_counts = tree.n[root_children_indices]
                 root_values = tree.v[root_children_indices]
                 root_pfail = []
-                root_alpha = []
+                root_delta = []
             else
                 error("Policy does not have root note visit information (or 'tree_in_info'/'counts_in_info' is not set)")
             end
 
-            @assert allequal(root_alpha)
-            if !isempty(root_alpha)
-                push!(alphas, root_alpha[1]) # all root_alpha values are the same
+            @assert allequal(root_delta)
+            if !isempty(root_delta)
+                push!(deltas, root_delta[1]) # all root_delta values are the same
             else
-                push!(alphas, NaN)
+                push!(deltas, NaN)
             end
 
             if use_completed_policy_gumbel
                 P = completed_policy # Completed policy for guarenteed improvement (see Danihelka et al. 2022)
             else
-                crit_info = (; Q=root_values, N=root_counts, F=root_pfail, α=root_alpha)
+                crit_info = (; Q=root_values, N=root_counts, F=root_pfail, Qtree=qvalues, Ftree=fvalues, Δ=root_delta, Δ0=Δ0)
                 tree_P = probability_vector(final_criterion, crit_info)
 
                 # Fill out entire policy vector for every action (if it wasn't seen in the tree, then p = ϵ for numerical stability)
@@ -744,7 +762,7 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
             # d.u = BetaZero.failure(pomdp, b0, s0, states[t:end], actions[t:end], real_returns[t:end]) # Note: Problem specific, provide function to compute this.
         end
 
-        metrics = collect_metrics ? compute_performance_metrics(pomdp, data, b0, s0, is_failure, beliefs, states, actions, real_returns, alphas, infos, T) : nothing
+        metrics = collect_metrics ? compute_performance_metrics(pomdp, data, b0, s0, is_failure, beliefs, states, actions, real_returns, deltas, infos, T) : nothing
         return data, metrics
     end
 end
@@ -754,7 +772,7 @@ end
 Method to collect performance and validation metrics during BetaZero policy iteration.
 Note, user defines `BetaZero.accuracy` to determine the accuracy of the final decision (if applicable).
 """
-function compute_performance_metrics(pomdp::POMDP, data, b0, s0, is_failure, beliefs, states, actions, returns, alphas, infos, T)
+function compute_performance_metrics(pomdp::POMDP, data, b0, s0, is_failure, beliefs, states, actions, returns, deltas, infos, T)
     # - mean discounted return over time
     # - accuracy over time (i.e., did it make the correct decision, if there's some notion of correct)
     # - number of actions (e.g., number of drills for mineral exploration)
@@ -762,7 +780,7 @@ function compute_performance_metrics(pomdp::POMDP, data, b0, s0, is_failure, bel
     discounted_return = returns[1]
     optimal_G = BetaZero.optimal_return(pomdp, s0) # User defined per-POMDP
     accuracy = !is_failure
-    return (discounted_return=discounted_return, accuracy=accuracy, optimal_return=optimal_G, num_actions=T, infos=infos, beliefs=beliefs, actions=actions, predicted_returns=predicted_returns, alphas=alphas, alpha=mean(alphas))
+    return (discounted_return=discounted_return, accuracy=accuracy, optimal_return=optimal_G, num_actions=T, infos=infos, beliefs=beliefs, actions=actions, predicted_returns=predicted_returns, deltas=deltas, delta=mean(deltas))
 end
 
 
@@ -777,9 +795,9 @@ function run_holdout_test!(pomdp::POMDP, solver::BetaZeroSolver, f::Surrogate; o
         accuracies = [m.accuracy for m in metrics]
         num_actions = [m.num_actions for m in metrics]
         optimal_returns = [m.optimal_return for m in metrics]
-        alphas = [m.alpha for m in metrics]
+        deltas = [m.delta for m in metrics]
         μ, σ = mean_and_std(returns)
-        push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns, accuracies=accuracies, num_actions=num_actions, optimal_returns=optimal_returns, alpha=mean(alphas)))
+        push!(solver.holdout_metrics, (mean=μ, std=σ, returns=returns, accuracies=accuracies, num_actions=num_actions, optimal_returns=optimal_returns, delta=mean(deltas)))
         solver.verbose && @show μ, σ
 
         if solver.plot_incremental_holdout
@@ -825,6 +843,52 @@ function offline_mode!(solver::BetaZeroSolver, policy::BetaZeroPolicy, τ=1)
     solver.mcts_solver.final_criterion = typeof(crit)(NamedTuple(p=>p == :τ ? τ : getproperty(crit, p) for p in propertynames(crit))...) # return maximizing action (bypass immutable structs)
     policy = solve_planner!(solver, policy.surrogate)
     return policy
+end
+
+
+"""
+Update the best surrogate based on returns (and p_fail if using ConstrainedZero).
+"""
+function update_best_so_far!(solver::BetaZeroSolver, candidate_surrogate::Surrogate, metrics)
+    bsf = solver.best_so_far
+    returns = mean(m.discounted_return for m in metrics)
+    if solver.is_constrained
+        p_fail = mean(!m.accuracy for m in metrics)
+        Δ0 = solver.mcts_solver.Δ0
+        local update = false
+        if bsf.p_fail > Δ0 # recorded is above threshold
+            # minimize p_fail in this case (tie break with returns)
+            if p_fail < bsf.p_fail # curent is better than recorded
+                update = true
+            elseif p_fail == bsf.p_fail && returns ≥ bsf.returns # current == recorded with better returns
+                update = true
+            end
+        elseif bsf.p_fail ≤ Δ0 && p_fail ≤ Δ0 # recorded and current are below threshold
+            # maximize returns in this case (tie break with p_fail)
+            if returns > bsf.returns # current has better returns
+                update = true
+            elseif returns == bsf.returns && p_fail ≤ bsf.p_fail # equal returns, but better p_fail
+                update = true
+            end
+        end
+        if update
+            solver.verbose && @info "Updated best so far: returns = $returns and p_fail = $p_fail"
+            bsf.surrogate = candidate_surrogate
+            bsf.p_fail = p_fail
+            bsf.returns = returns
+        else
+            solver.verbose && @info "Best so far: returns = $(bsf.returns) and p_fail = $(bsf.p_fail)"
+        end
+    else
+        if returns ≥ bsf.returns
+            solver.verbose && @info "Updated best so far: returns = $returns"
+            bsf.surrogate = candidate_surrogate
+            bsf.returns = returns
+        else
+            solver.verbose && @info "Best so far: returns = $(bsf.returns)"
+        end
+    end
+    return bsf
 end
 
 

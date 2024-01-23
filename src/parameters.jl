@@ -34,7 +34,7 @@ Parameters for neural network surrogate model.
     training_split::Float64 = 0.8                    # Training / validation split (Default: 80/20)
     sample_more_than_collected::Bool = true          # Sample more data (with replacement) than is in the buffer
     batchsize::Int = 512                             # Batch size
-    learning_rate::Float64 = 1e-3                    # Learning rate for ADAM optimizer during training
+    learning_rate::Union{Float64,LearningRateScheduler} = 1e-3 # Learning rate for ADAM optimizer during training
     λ_regularization::Float64 = 1e-5                 # Parameter for L2-norm regularization
     optimizer = Adam                                 # Training optimizer (e.g., Adam, Descent, Nesterov)
     loss_func::Function = Flux.Losses.mse            # MAE works well for problems with large returns around zero, and spread out otherwise.
@@ -108,4 +108,14 @@ mutable struct ParameterCollection
     params::BetaZeroParameters
     nn_params::BetaZeroNetworkParameters
     gp_params::BetaZeroGPParameters
+end
+
+
+"""
+Struct to hold the best surrogate and its metrics.
+"""
+@with_kw mutable struct BestSoFar
+    surrogate = nothing
+    returns::Float64 = -Inf
+    p_fail::Float64 = Inf
 end

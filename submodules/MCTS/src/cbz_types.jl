@@ -79,8 +79,8 @@ Fields:
 
     init_F::Any
         Function, object, or number used to set the initial F(s,a) value at a new node.
-        If this is a function `f`, `f(mdp, s)` will be called to set the value.
-        If this is an object `o`, `init_F(o, mdp, s)` will be called.
+        If this is a function `f`, `f(mdp, s, a)` will be called to set the value.
+        If this is an object `o`, `init_F(o, mdp, s, a)` will be called.
         If this is a number, F will always be set to that number.
         default: 0.0
 
@@ -135,8 +135,9 @@ mutable struct CBZSolver <: AbstractMCTSSolver
     init_Q::Any
     init_N::Any
     init_F::Any
-    α0::Float64
+    Δ0::Float64
     η::Float64
+    δ::Float64
     next_action::Any
     default_action::Any
     reset_callback::Function
@@ -168,13 +169,14 @@ function CBZSolver(;
                     counts_in_info::Bool=true,
                     rng::AbstractRNG=Random.GLOBAL_RNG,
                     estimate_value::Any=RolloutEstimator(RandomSolver(rng)),
-                    estimate_policy::Any=0,
+                    estimate_policy::Any=1,
                     estimate_failure::Any=0.0,
                     init_Q::Any=0.0,
                     init_N::Any=0,
                     init_F::Any=0.0,
-                    α0::Any=1.0,
-                    η::Any=0.005,
+                    Δ0::Float64=1.0,
+                    η::Float64=0.0005,
+                    δ::Float64=0.5,
                     next_action::Any=RandomActionGenerator(rng),
                     default_action::Any=ExceptionRethrow(),
                     reset_callback::Function=(mdp, s) -> false,
@@ -204,8 +206,9 @@ function CBZSolver(;
             init_Q,
             init_N,
             init_F,
-            α0,
+            Δ0,
             η,
+            δ,
             next_action,
             default_action,
             reset_callback,
@@ -226,7 +229,8 @@ mutable struct CBZTree{S,A}
     n::Vector{Int}
     q::Vector{Float64}
     f::Vector{Float64}
-    α::Vector{Float64}
+    Δ::Vector{Float64}
+    Δ0::Float64
     flb::Dict{Int, Float64}
     fub::Dict{Int, Float64}
     transitions::Vector{Vector{Tuple{Int,Float64,Float64}}}
@@ -238,17 +242,18 @@ mutable struct CBZTree{S,A}
     unique_transitions::Set{Tuple{Int,Int}}
 
 
-    function CBZTree{S,A}(sz::Int=1000) where {S,A} 
+    function CBZTree{S,A}(sz::Int=1000; Δ0::Real) where {S,A}
         sz = min(sz, 100_000)
         return new(sizehint!(Int[], sz),
                    sizehint!(Vector{Int}[], sz),
                    sizehint!(S[], sz),
                    Dict{S, Int}(),
-                   
+
                    sizehint!(Int[], sz),
                    sizehint!(Float64[], sz),
                    sizehint!(Float64[], sz),
                    sizehint!(Float64[], sz),
+                   Δ0,
                    Dict{Int, Float64}(),
                    Dict{Int, Float64}(),
                    sizehint!(Vector{Tuple{Int,Float64,Float64}}[], sz),
@@ -262,11 +267,11 @@ mutable struct CBZTree{S,A}
 end
 
 
-function insert_state_node!(tree::CBZTree{S,A}, s::S, α0::Float64, maintain_s_lookup=true) where {S,A}
+function insert_state_node!(tree::CBZTree{S,A}, s::S, Δ0::Real, maintain_s_lookup=true) where {S,A}
     push!(tree.total_n, 0)
     push!(tree.children, Int[])
     push!(tree.s_labels, s)
-    push!(tree.α, 1 - α0)
+    push!(tree.Δ, Δ0)
     snode = length(tree.total_n)
     if maintain_s_lookup
         tree.s_lookup[s] = snode
@@ -275,7 +280,7 @@ function insert_state_node!(tree::CBZTree{S,A}, s::S, α0::Float64, maintain_s_l
 end
 
 
-function insert_action_node!(tree::CBZTree{S,A}, snode::Int, a::A, n0::Int, q0::Float64, f0::Real, maintain_a_lookup=true) where {S,A}
+function insert_action_node!(tree::CBZTree{S,A}, snode::Int, a::A, n0::Int, q0::Real, f0::Real, maintain_a_lookup=true) where {S,A}
     push!(tree.n, n0)
     push!(tree.q, q0)
     push!(tree.f, f0)
@@ -287,21 +292,7 @@ function insert_action_node!(tree::CBZTree{S,A}, snode::Int, a::A, n0::Int, q0::
     if maintain_a_lookup
         tree.a_lookup[(snode, a)] = sanode
     end
-    updatebounds!(tree, snode, sanode)
     return sanode
-end
-
-function updatebounds!(tree::CBZTree{S,A}, snode::Int, sanode::Int) where {S,A}
-    fsa = tree.f[sanode]
-    if haskey(tree.flb, snode)
-        fsa < tree.flb[snode] && (tree.flb[snode] = fsa) # update lower bound
-        fsa > tree.fub[snode] && (tree.fub[snode] = fsa) # update upper bound
-    else
-        # guarenteed flb and fub have the same keys
-        tree.flb[snode] = fsa
-        tree.fub[snode] = fsa
-    end
-    return tree.flb[snode], tree.fub[snode]
 end
 
 Base.isempty(tree::CBZTree) = isempty(tree.n) && isempty(tree.q) && isempty(tree.f)

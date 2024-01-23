@@ -19,21 +19,27 @@ function POMDPs.gen(bmdp::BeliefCCMDP, b, a, rng::AbstractRNG)
     s = rand(rng, b) # NOTE: Different than Josh's implementation
     if isterminal(bmdp.pomdp, s)
         bp = bccmdp_handle_terminal(bmdp.pomdp, bmdp.updater, b, s, a, rng::AbstractRNG)::typeof(b)
-        return (sp=bp, r=0.0, e=e)
+        return (sp=bp, r=0.0, p=0.0)
     end
     sp, o = @gen(:sp, :o)(bmdp.pomdp, s, a, rng)
     bp = update(bmdp.updater, b, a, o)
     r = bmdp.belief_reward(bmdp.pomdp, b, a, bp)
-    # e = bmdp.isfailure(bmdp.pomdp, s, a) # Check if state is a failure (boolean)
-    e = bmdp.isfailure(bmdp.pomdp, b, a) # , bp # Check if belief is a failure (probability)
-    return (sp=bp, r=r, e=e)
+    p = bmdp.isfailure(bmdp.pomdp, b, a) # Get belief failure probability
+    return (sp=bp, r=r, p=p)
 end
 
 POMDPs.actions(bmdp::BeliefCCMDP{P,U,B,A}, b::B) where {P,U,B,A} = actions(bmdp.pomdp, b)
 POMDPs.actions(bmdp::BeliefCCMDP) = actions(bmdp.pomdp)
 POMDPs.actionindex(bmdp::BeliefCCMDP, a::Int) = findfirst(actions(bmdp) .== a)
 
-POMDPs.isterminal(bmdp::BeliefCCMDP, b) = all(isterminal(bmdp.pomdp, s) for s in support(b))
+function POMDPs.isterminal(bmdp::BeliefCCMDP{P,U,B,A}, b::B) where {P,U,B,A}
+    try
+        return all(isterminal(bmdp.pomdp, s) for s in support(b))
+    catch
+        return isterminal(bmdp.pomdp, mean(b))
+    end
+end
+POMDPs.isterminal(bmdp::BeliefCCMDP{P,U,B,A}, a::A) where {P,U,B,A} = isterminal(bmdp.pomdp, a)
 
 POMDPs.discount(bmdp::BeliefCCMDP) = discount(bmdp.pomdp)
 

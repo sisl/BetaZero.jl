@@ -45,6 +45,7 @@ end
 
 
 normalize01(x, X) = (x - minimum(X)) / (maximum(X) - minimum(X))
+normalize01(x, mn::Real, mx::Real) = (x .- mn) ./ (mx .- mn)
 
 
 """
@@ -130,7 +131,7 @@ rolling_stderr(X, window) = [begin X′ = X[(i - window < 1 ? 1 : i - window):(i
 
 
 # Exponential Smoothing (from Crux.jl)
-function smooth(v, weight = 0.6)
+function smooth(v, weight=0.6)
     N = length(v)
     smoothed = Array{Float64, 1}(undef, N)
     smoothed[1] = v[1]
