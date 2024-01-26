@@ -216,7 +216,10 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     loss(x, y; w=value_loss_weight, info=Dict()) = begin
         local ỹ = f(x)
         n = size(ỹ,1)-1
-        vmask = Flux.CuArray(vcat(1, zeros(Int,n)))
+        vmask = vcat(1, zeros(Int,n))
+        if device == gpu
+            vmask = Flux.CuArray(vmask)
+        end
         pmask = 1 .- vmask
         v = vmask .* ỹ # value prediction
         𝐩 = pmask .* ỹ # policy prediction
@@ -481,7 +484,9 @@ function train(f::Chain, solver::BetaZeroSolver; verbose::Bool=false, results=no
     if device == gpu
         x_train = y_train = x_valid = y_valid = nothing
         GC.gc()
-        Flux.CUDA.reclaim()
+        if device == gpu
+            Flux.CUDA.reclaim()
+        end
     end
 
     return f
