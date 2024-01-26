@@ -59,7 +59,7 @@ Parameters for neural network surrogate model.
     use_kl_loss::Bool = false                        # Use KL-divergence as classification (policy) loss (for Gumbel solver)
     incremental_save::Bool = false                   # Incrementally save off policy every iteration (TODO: fix undefined reference error)
     policy_filename::String = "betazero_policy.bson" # Filename when incrementally saving off poliy
-    device = gpu                                     # Indicate what device to train on (`gpu` or `cpu`)
+    device = cpu                                     # Indicate what device to train on (`gpu` or `cpu`)
     use_checkpoint::Bool = true                      # Save networks along the way to use based on minimum validation loss
     checkpoint_frequency::Int = 1                    # How often do we evaluate and save a checkpoint?
     checkpoint_validation_loss::Bool = true          # Checkpoint based on minimum validation loss (`false` = checkpointing on training loss)
