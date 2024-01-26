@@ -101,7 +101,7 @@ function POMDPTools.render(pomdp::POMDP, step;
     show_belief && plot_beliefs(B; hold=true)
 
     plot!(eachindex(S), Y, palette=palette, c=traj_color, lw=traj_lw, label=use_pgf ? traj_label : false, alpha=traj_alpha)
-    show_end_failure = show_failure && isfailure(pomdp, S[end], A[end])
+    show_end_failure = show_failure && MCTS.isfailure(pomdp, S[end], A[end])
     end_mark = show_end_failure ? :star4 : :circle
     end_msc = show_end_failure ? :red : mark_color
 

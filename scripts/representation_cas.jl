@@ -37,11 +37,11 @@ BetaZero.accuracy(pomdp::CollisionAvoidancePOMDP, b0, s0, states, actions, retur
 BetaZero.failure(pomdp::CollisionAvoidancePOMDP, b0, s0, states, actions, returns) = CollisionAvoidancePOMDPs.isfailure(pomdp, states[end])
 
 function cas_plot_callback(solver, pomdp, up, policy)
-    # τ = solver.mcts_solver.final_criterion.τ
-    # policy = online_mode!(solver, policy)
-    display(cas_policy_plot(pomdp, up, policy, policy_lookup))
+    τ = solver.mcts_solver.final_criterion.τ
+    policy = online_mode!(solver, policy)
+    display(cas_policy_plot(pomdp, up, policy, policy_lookup; use_blur=false))
     H = generate_histories(pomdp, policy, up, 20; parallel=true)
-    # offline_mode!(solver, policy, τ) # important to reset it with proper τ.
-    # @show solver.mcts_solver.final_criterion.τ
+    offline_mode!(solver, policy, τ) # important to reset it with proper τ.
+    @show solver.mcts_solver.final_criterion.τ
     return plot_histories(pomdp, H)
 end

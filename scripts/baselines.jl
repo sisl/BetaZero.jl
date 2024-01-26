@@ -245,13 +245,23 @@ end
     function mcts_lavi(mcts_planner, lavi_policy)
         mcts_planner = deepcopy(mcts_planner)
         mcts_planner.solver.estimate_value = (bmdp,b,d)->begin
-            b̃ = BetaZero.input_representation(b)
-            return value(lavi_policy, b)
+            return value(lavi_policy, b) # value_lookup done in `neural_network.jl`
         end
         mcts_planner.solver.next_action = (bmdp,b,bnode)->begin
             b̃ = BetaZero.input_representation(b)
-            s = convert_s(ParticleHistoryBelief, b̃, bmdp)
+            s = convert_s(ParticleHistoryBelief{LightDarkState}, b̃, bmdp)
             return action(lavi_policy, s)
+        end
+        mcts_planner.solver.estimate_policy = (bmdp,b)->begin
+            b̃ = BetaZero.input_representation(b)
+            s = convert_s(ParticleHistoryBelief{LightDarkState}, b̃, bmdp)
+            a = action(lavi_policy, s)
+            ϵ = 1e-6
+            A = actions(bmdp)
+            𝐩 = fill(ϵ, length(A))
+            𝐩[findfirst(ab->ab == a, A)] = 1
+            𝐩 = 𝐩 ./ sum(𝐩)
+            return 𝐩
         end
         mcts_planner = solve(mcts_planner.solver, mcts_planner.mdp) # Important for online policy
         return mcts_planner

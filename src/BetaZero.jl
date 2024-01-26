@@ -235,6 +235,7 @@ function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; seed=0, surrogate::S
 end
 
 
+get_bmdp(solver::BetaZeroSolver) = get_bmdp(solver, solver.updater)
 function get_bmdp(solver::BetaZeroSolver, up::Updater)
     if solver.is_constrained
         return BeliefCCMDP(solver.pomdp, up, solver.belief_reward, MCTS.isfailure)
@@ -248,7 +249,7 @@ end
 Conver the `POMDP` to a `BeliefMDP` and set the `pomdp.bmdp` field.
 """
 function fill_bmdp!(solver::BetaZeroSolver)
-    solver.bmdp = get_bmdp(solver, solver.updater)
+    solver.bmdp = get_bmdp(solver)
     return solver.bmdp
 end
 
@@ -259,12 +260,14 @@ Return the BetaZero planner, first adding the value estimator and then solving t
 function solve_planner!(policy::BetaZeroPolicy, f::Surrogate=policy.surrogate)
     attach_surrogate!(policy.planner.solver, policy.parameters.nn_params, f)
     bmdp = policy.planner.mdp
-    policy.planner.solver.reset_callback = (mdp, s)->false
-    policy.planner.solver.timer = ()->1e-9 * time_ns()
-    if policy.planner.solver.init_Q isa Function || policy.parameters.params.bootstrap_q
-        policy.planner.solver.init_Q = bootstrap(f) # re-apply bootstrap
+    if policy.planner.solver isa AbstractMCTSSolver
+        policy.planner.solver.reset_callback = (mdp, s)->false
+        policy.planner.solver.timer = ()->1e-9 * time_ns()
+        if policy.planner.solver.init_Q isa Function || policy.parameters.params.bootstrap_q
+            policy.planner.solver.init_Q = bootstrap(f) # re-apply bootstrap
+        end
+        mcts_planner = solve(policy.planner.solver, bmdp)
     end
-    mcts_planner = solve(policy.planner.solver, bmdp)
     policy.surrogate = f
     policy.planner = mcts_planner
     return policy
@@ -273,8 +276,10 @@ end
 function solve_planner!(solver::BetaZeroSolver, f::Surrogate)
     attach_surrogate!(solver, f)
     fill_bmdp!(solver)
-    solver.mcts_solver.reset_callback = (mdp, s)->false
-    solver.mcts_solver.timer = ()->1e-9 * time_ns()
+    if solver.mcts_solver isa AbstractMCTSSolver
+        solver.mcts_solver.reset_callback = (mdp, s)->false
+        solver.mcts_solver.timer = ()->1e-9 * time_ns()
+    end
     mcts_planner = solve(solver.mcts_solver, solver.bmdp)
     parameters = ParameterCollection(solver.params, solver.nn_params, solver.gp_params)
     return BetaZeroPolicy(f, mcts_planner, parameters)
