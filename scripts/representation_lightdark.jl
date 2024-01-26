@@ -19,6 +19,19 @@ end
 
 up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, 500))
 
+POMDPs.solve(sol::DESPOTSolver, p::BeliefMDP) = solve(sol, p.pomdp)
+
+zeroifnan(x) = isnan(x) ? 0 : x
+
+function BetaZero.input_representation(b::ScenarioBelief)
+    P = collect(particles(b))
+    Y = [s.y for s in P]
+    t = Float32(P[1].t) # all the same time
+    μ = mean(Y)
+    σ = zeroifnan(std(Y))
+    return Float32[μ, σ]
+end
+
 function BetaZero.input_representation(b::ParticleHistoryBelief{LightDarkState};
         include_std::Bool=true, # Important to capture uncertainty in belief.
         use_higher_orders::Bool=false,

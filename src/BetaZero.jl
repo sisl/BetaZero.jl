@@ -109,7 +109,7 @@ mean_belief_reward′(pomdp::POMDP, b, a, bp) = mean(reward(pomdp, s, a, sp) for
     belief_reward::Function = mean_belief_reward
     is_constrained::Bool = false # ConstrainedZero: whether to use a chance-constrained belief MDP
     include_info::Bool = false # Include `action_info` in metrics when running POMDP simulation
-    mcts_solver::AbstractMCTSSolver = begin
+    mcts_solver::Union{Any,AbstractMCTSSolver} = begin # TODO: mcts_solver::Any
         if is_constrained
             CBZSolver(n_iterations=100,
                       check_repeat_action=true,
@@ -173,7 +173,7 @@ const Surrogate = Union{Chain, GPSurrogate, EnsembleNetwork} # Needs GPSurrogate
 
 mutable struct BetaZeroPolicy <: POMDPs.Policy
     surrogate::Surrogate
-    planner::AbstractMCTSPlanner
+    planner
     parameters::ParameterCollection
 end
 
@@ -308,9 +308,13 @@ function attach_surrogate!(mcts_solver, nn_params::BetaZeroNetworkParameters, f:
         mcts_solver.estimate_failure=(bmdp,b)->pfail_lookup(f, b)
         mcts_solver.init_F=(bmdp,b,a)->MCTS.isfailure(bmdp, b, a)
         mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
-    else
+    elseif mcts_solver isa DPWSolver
         mcts_solver.estimate_value = (bmdp,b,d)->value_lookup(f, b)
         mcts_solver.next_action = (bmdp,b,bnode)->next_action(bmdp, b, f, nn_params, bnode)
+    else # LeTS-Drive: DESPOTSolver
+        mcts_solver.estimate_value = b->value_lookup(f, b)
+        mcts_solver.estimate_policy = b->policy_lookup(f, b)
+        # mcts_solver.default_action = (pomdp, b, ex)->next_action(pomdp, b, f, nn_params, 0)
     end
     return nothing
 end
@@ -602,6 +606,8 @@ function compute_predicted_returns(R::Vector, beliefs::Vector, network::Surrogat
     return G
 end
 
+function probability_vector_despot end
+
 
 """
 Run single simulation using a belief-MCTS policy on the original POMDP (i.e., notabily, not on the belief-MDP).
@@ -680,6 +686,12 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                 end
             elseif haskey(info, :completed_policy)
                 completed_policy = info[:completed_policy]
+            elseif haskey(info, :qvalues) # LeTS-Drive: DESPOTSolver
+                root_actions = info[:root_actions]
+                root_values = info[:qvalues]
+                root_counts = []
+                root_pfail = []
+                root_delta = []
             elseif haskey(info, :tree)
                 tree = info[:tree]
                 root_children_indices = tree.tried[1]
@@ -703,7 +715,8 @@ function run_simulation(pomdp::POMDP, policy::POMDPs.Policy, up::POMDPs.Updater,
                 P = completed_policy # Completed policy for guarenteed improvement (see Danihelka et al. 2022)
             else
                 crit_info = (; Q=root_values, N=root_counts, F=root_pfail, Qtree=qvalues, Ftree=fvalues, Δ=root_delta, Δ0=Δ0)
-                tree_P = probability_vector(final_criterion, crit_info)
+                # tree_P = probability_vector(final_criterion, crit_info) # ! NOTE.
+                tree_P = probability_vector_despot(final_criterion, crit_info)
 
                 # Fill out entire policy vector for every action (if it wasn't seen in the tree, then p = ϵ for numerical stability)
                 for (i,a′) in enumerate(action_space)
