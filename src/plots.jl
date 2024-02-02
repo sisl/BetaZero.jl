@@ -99,7 +99,7 @@ function value_plot(policy::BetaZeroPolicy;
     if show_data
         data = (X1, X2, Ydata)
         scatter!(X1, X2, label=false, c=:black, marker=:circle, msc=:black, ms=0.5, alpha=0.075)
-        Plots.annotate!(2.1, 8.0, (raw"\(\leftarrow\) training data distribution", 10, :black, :center))
+        Plots.annotate!(2.1, 8.0, (raw"<--- training data distribution", 10, :black, :center))
     end
 
     plt = plot!(xlims=xl, ylims=yl)
@@ -202,11 +202,16 @@ end
 """
 Plot combined value and policy plots.
 """
-function value_and_policy_plot(pomdp::POMDP, policy::BetaZeroPolicy; lavi_policy=nothing, nrange=50, kwargs...)
+function value_and_policy_plot(pomdp::POMDP, 
+                                policy::BetaZeroPolicy;
+                                solver=nothing, 
+                                lavi_policy=nothing, 
+                                nrange=50, 
+                                kwargs...)
     include_lavi = !isnothing(lavi_policy)
     use_pgf = kwargs[:use_pgf]
-    vplt, data, cmap = value_plot(policy; return_data=true, return_cmap=true, kwargs..., tight=include_lavi, nrange, title="BetaZero raw value network")
-    pplt = policy_plot(pomdp, policy; data, kwargs..., tight=include_lavi, nrange, title="BetaZero raw policy network")
+    vplt, data, cmap = value_plot(policy; use_pgf=use_pgf, solver=solver, return_data=true, return_cmap=true, kwargs..., tight=include_lavi, nrange, title="BetaZero raw value network")
+    pplt = policy_plot(pomdp, policy; use_pgf=use_pgf, solver=solver, data, kwargs..., tight=include_lavi, nrange, title="BetaZero raw policy network")
     if include_lavi
         # LAVI value plot
         if use_pgf

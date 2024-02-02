@@ -179,7 +179,12 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             tree.n_a_children[sanode] += 1
         end
     else
-        spnode, r = rand(dpw.rng, tree.transitions[sanode])
+        probs = [rand() for _ in 1:length(tree.transitions[sanode])]
+        probs /= sum(probs)
+        distr = Categorical(probs)
+        ind = rand(distr)
+        spnode, r = tree.transitions[sanode][ind]
+        # spnode, r = rand(dpw.rng, tree.transitions[sanode]) # Here's where I insert my dummy distribution suhastag
     end
 
     if new_node

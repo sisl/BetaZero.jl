@@ -2,7 +2,7 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         updater=up,
                         belief_reward=lightdark_belief_reward,
                         params=BetaZeroParameters(
-                            n_iterations=30,
+                            n_iterations=5, # TODO: Restore to 30 when running real experiments
                             n_data_gen=500,
                         ),
                         collect_metrics=true,
