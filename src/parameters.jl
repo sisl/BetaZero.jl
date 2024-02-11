@@ -36,7 +36,7 @@ Parameters for neural network surrogate model.
     batchsize::Int = 512                             # Batch size
     learning_rate::Float64 = 1e-3                    # Learning rate for ADAM optimizer during training
     λ_regularization::Float64 = 1e-5                 # Parameter for L2-norm regularization
-    optimizer = Adam                                 # Training optimizer (e.g., Adam, Descent, Nesterov)
+    optimizer = Flux.Adam                            # Training optimizer (e.g., Adam, Descent, Nesterov)
     loss_func::Function = Flux.Losses.mse            # MAE works well for problems with large returns around zero, and spread out otherwise.
     activation::Function = relu                      # Activation function
     layer_size::Int = 64                             # Number of connections in fully connected layers (for CNN, refers to fully connected "head" layers)
