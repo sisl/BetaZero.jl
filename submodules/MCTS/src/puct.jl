@@ -182,8 +182,10 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             tree.n_a_children[sanode] += 1
         end
     else
-        tree.uncertainties[sanode] = tree.uncertainties[sanode] / sum(tree.uncertainties[sanode])
-        distr = Categorical(tree.uncertainties[sanode])
+        nvisits = [tree.n[spn] for (spn, rew) in tree.transitions[sanode]]
+        scaled_uncertainty = tree.uncertainties[sanode] ./ nvisits
+        scaled_uncertainty = scaled_uncertainty / sum(scaled_uncertainty)
+        distr = Categorical(scaled_uncertainty)
         selected_obs_ind = rand(distr)
         spnode, r = tree.transitions[sanode][selected_obs_ind]
     end
