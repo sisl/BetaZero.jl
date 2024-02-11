@@ -207,6 +207,7 @@ mutable struct PUCTTree{S,A}
     n::Vector{Int}
     q::Vector{Float64}
     transitions::Vector{Vector{Tuple{Int,Float64}}}
+    uncertainties::Vector{Vector{Float64}} # Uncertainty estimate. Use uncertainties[sanode][ind] to get var of a node
     a_labels::Vector{A}
     a_lookup::Dict{Tuple{Int,A}, Int}
 
