@@ -162,6 +162,8 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
     if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
     # if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state) || tree.n_a_children[sanode] == 0 #! Note.
         sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
+        # Ideally it would be something like 
+        # sp, r, unc = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
 
         if sol.check_repeat_state && haskey(tree.s_lookup, sp)
             spnode = tree.s_lookup[sp]
@@ -169,7 +171,8 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             spnode = insert_state_node!(tree, sp, sol.keep_tree || sol.check_repeat_state)
             new_node = true
         end
-
+        
+        push!(tree.uncertainties[sanode], rand())
         push!(tree.transitions[sanode], (spnode, r))
 
         if !sol.check_repeat_state
@@ -179,12 +182,12 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             tree.n_a_children[sanode] += 1
         end
     else
-        probs = [rand() for _ in 1:length(tree.transitions[sanode])]
-        probs /= sum(probs)
-        distr = Categorical(probs)
-        ind = rand(distr)
-        spnode, r = tree.transitions[sanode][ind]
-        # spnode, r = rand(dpw.rng, tree.transitions[sanode]) # Here's where I insert my dummy distribution suhastag
+        nvisits = [spn <= length(tree.n) ? tree.n[spn] + 1 : 1 for (spn, rew) in tree.transitions[sanode]]
+        scaled_uncertainty = tree.uncertainties[sanode] ./ nvisits
+        scaled_uncertainty = scaled_uncertainty / sum(scaled_uncertainty)
+        distr = Categorical(scaled_uncertainty)
+        selected_obs_ind = rand(distr)
+        spnode, r = tree.transitions[sanode][selected_obs_ind]
     end
 
     if new_node
@@ -206,7 +209,8 @@ function add_state!(sol::PUCTSolver, tree, sanode, sp, r)
         spnode = insert_state_node!(tree, sp, sol.keep_tree || sol.check_repeat_state)
         new_node = true
     end
-
+    
+    push!(tree.uncertainties[sanode], rand())
     push!(tree.transitions[sanode], (spnode, r))
 
     if !sol.check_repeat_state
