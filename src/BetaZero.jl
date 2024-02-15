@@ -216,6 +216,9 @@ function solve_planner!(policy::BetaZeroPolicy, f::Surrogate=policy.surrogate)
     if policy.planner.solver.init_Q isa Function || policy.parameters.params.bootstrap_q
         policy.planner.solver.init_Q = bootstrap(f) # re-apply bootstrap
     end
+    if policy.parameters.params.bootstrap_u && f isa EnsembleNetwork
+        policy.planner.solver.init_U = bootstrap_uncertainty(f) # apply ensemble bootstrap
+    end
     mcts_planner = solve(policy.planner.solver, bmdp)
     policy.surrogate = f
     policy.planner = mcts_planner
