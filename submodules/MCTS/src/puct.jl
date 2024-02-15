@@ -171,8 +171,8 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             spnode = insert_state_node!(tree, sp, sol.keep_tree || sol.check_repeat_state)
             new_node = true
         end
-        
-        push!(tree.uncertainties[sanode], rand())
+
+        push!(tree.uncertainties[sanode], init_U(sol.init_U, dpw.mdp, sp))
         push!(tree.transitions[sanode], (spnode, r))
 
         if !sol.check_repeat_state
