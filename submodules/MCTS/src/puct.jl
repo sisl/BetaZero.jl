@@ -162,8 +162,6 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
     if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
     # if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state) || tree.n_a_children[sanode] == 0 #! Note.
         sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
-        # Ideally it would be something like 
-        # sp, r, unc = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
 
         if sol.check_repeat_state && haskey(tree.s_lookup, sp)
             spnode = tree.s_lookup[sp]
@@ -172,7 +170,12 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             new_node = true
         end
 
-        push!(tree.uncertainties[sanode], init_U(sol.init_U, dpw.mdp, sp))
+        # update average uncertainty of the sanode (TODO: Consider moving to above if else block)
+        n_belief_children = length(tree.uncertainties[sanode]) # Number of belief children for a sanode
+        new_sp_uncertainty = init_U(sol.init_U, dpw.mdp, sp)
+        tree.action_uncertainty[sanode] = (tree.action_uncertainty[sanode] * n_belief_children + new_sp_uncertainty) / (n_belief_children + 1)
+
+        push!(tree.uncertainties[sanode], new_sp_uncertainty)
         push!(tree.transitions[sanode], (spnode, r))
 
         if !sol.check_repeat_state

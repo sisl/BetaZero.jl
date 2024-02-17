@@ -217,7 +217,8 @@ mutable struct PUCTTree{S,A}
     n::Vector{Int}
     q::Vector{Float64}
     transitions::Vector{Vector{Tuple{Int,Float64}}}
-    uncertainties::Vector{Vector{Float64}} # Uncertainty estimate. Use uncertainties[sanode][ind] to get var of a node
+    uncertainties::Vector{Vector{Float64}} # Uncertainty estimate for child belief. Use uncertainties[sanode][ind] to get var of a node
+    action_uncertainty::Vector{Float64} # Uncertainty estimate for action node.
     a_labels::Vector{A}
     a_lookup::Dict{Tuple{Int,A}, Int}
 
@@ -237,6 +238,7 @@ mutable struct PUCTTree{S,A}
                    sizehint!(Float64[], sz),
                    sizehint!(Vector{Tuple{Int,Float64}}[], sz),
                    sizehint!(Vector{Float64}[], sz),
+                   sizehint!(Float64[], sz),
                    sizehint!(A[], sz),
                    Dict{Tuple{Int,A}, Int}(),
 
@@ -265,6 +267,7 @@ function insert_action_node!(tree::PUCTTree{S,A}, snode::Int, a::A, n0::Int, q0:
     push!(tree.a_labels, a)
     push!(tree.transitions, Vector{Tuple{Int,Float64}}[])
     push!(tree.uncertainties, Vector{Float64}[])
+    push!(tree.action_uncertainty, 0)
     sanode = length(tree.n)
     push!(tree.children[snode], sanode)
     push!(tree.n_a_children, 0)
