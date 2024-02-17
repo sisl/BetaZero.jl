@@ -76,6 +76,13 @@ Fields:
         If this is an object `o`, `init_N(o, mdp, s, a)` will be called.
         If this is a number, N will always be set to that number.
         default: 0
+    
+    init_U::Any
+        Function, object, or number used to set the initial uncertainty value at a new belief node.
+        If this is a function `f`, `f(mdp, s)` will be called to set the value.
+        If this is an object `o`, `init_Q(o, mdp, s)` will be called.
+        If this is a number, Q will always be set to that number.
+        default: 1.0
 
     next_action::Any
         Function or object used to choose the next action to be considered for progressive widening.
@@ -126,6 +133,7 @@ mutable struct PUCTSolver <: AbstractMCTSSolver
     estimate_policy::Any
     init_Q::Any
     init_N::Any
+    init_U::Any
     next_action::Any
     default_action::Any
     reset_callback::Function
@@ -160,6 +168,7 @@ function PUCTSolver(;
                     estimate_policy::Any=0,
                     init_Q::Any=0.0,
                     init_N::Any=0,
+                    init_U::Any=1.0,
                     next_action::Any=RandomActionGenerator(rng),
                     default_action::Any=ExceptionRethrow(),
                     reset_callback::Function=(mdp, s) -> false,
@@ -187,6 +196,7 @@ function PUCTSolver(;
             estimate_policy,
             init_Q,
             init_N,
+            init_U,
             next_action,
             default_action,
             reset_callback,
