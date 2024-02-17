@@ -19,6 +19,7 @@ Parameters for the BetaZero algorithm.
     eval_on_accuracy::Bool = false            # If evaluating (i.e., `n_evaluate > 0`), then base comparison on accuracy of the two networks
     bootstrap_q::Bool = false                 # Bootstrap the `init_Q` using the value network when a new (b,a) node is added during MCTS.
     bootstrap_u::Bool = false                 # Bootstrap the `init_U` using the ensemble network when a new belief node is added during MCTS.
+    n_ensembled::Int = 1                     # If using an Ensemble Network, the number of weak learners to use.
 end
 
 

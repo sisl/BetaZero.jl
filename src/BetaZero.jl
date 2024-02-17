@@ -154,6 +154,9 @@ include("plots.jl")
 The main BetaZero policy iteration algorithm.
 """
 function POMDPs.solve(solver::BetaZeroSolver, pomdp::POMDP; surrogate::Surrogate=solver.params.use_nn ? initialize_network(solver) : initialize_gaussian_process(solver), resume::Bool=false)
+    if (solver.params.n_ensembled > 1)
+        surrogate = initialize_ensemble(solver, solver.params.n_ensembled)
+    end
     local current_surrogate = surrogate
     local best_surrogate = surrogate
     rstats = RunningStats()
