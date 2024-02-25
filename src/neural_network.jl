@@ -531,7 +531,7 @@ uncertainty_lookup(policy::BetaZeroPolicy, belief) = uncertainty_lookup(policy.s
 function uncertainty_lookup(f::EnsembleNetwork, belief)
     x = network_input(belief)
     μ, σ = cpu(f(x,return_std=true)) # evaluate network `f`. EnsembleNetwork is capable of returning μ, σ if return_std is set to true
-    return σ
+    return σ # suhastag here's where we could change standard deviation or variance
 end
 
 """
