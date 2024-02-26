@@ -1,6 +1,9 @@
 """
 Initialize policy & value network with random weights.
 """
+
+using Statistics
+
 initialize_network(solver::BetaZeroSolver) = initialize_network(solver.nn_params)
 function initialize_network(nn_params::BetaZeroNetworkParameters)
     input_size = nn_params.input_size
@@ -533,6 +536,20 @@ function uncertainty_lookup(f::EnsembleNetwork, belief)
     μ, σ = cpu(f(x,return_std=true)) # evaluate network `f`. EnsembleNetwork is capable of returning μ, σ if return_std is set to true
     return σ # suhastag here's where we could change standard deviation or variance
 end
+
+function uncertainty_lookup_dropout(f::Chain, belief, num_preds::int = 3)
+    x = network_input(belief)
+    base_network = f[:-1]
+    heads = f[-1]
+    base_output = cpu(base_network(x))
+    preds = zeros(0)
+    for i in 1: num_preds + 1:
+        μ = cpu(heads(base_output, return_std=False))
+        append!( preds, μ)
+    μ = mean(preds)
+    σ = std(preds)
+    return σ
+
 
 """
 Evaluate the neural network `f` using the `belief` as input, return the predicted policy vector.
