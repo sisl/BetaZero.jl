@@ -523,30 +523,7 @@ value_lookup(f::Union{Chain,EnsembleNetwork}, belief) = network_lookup(f, belief
 POMDPs.value(policy::BetaZeroPolicy, belief) = value_lookup(policy, belief)
 POMDPs.value(f::Union{Chain,EnsembleNetwork}, belief) = value_lookup(f, belief)
 
-"""
-Evaluate the ensemble neural network `f` using the `belief` as input, return variance of predicted values.
-Note, inference is done on the CPU given a single input.
-"""
-uncertainty_lookup(policy::BetaZeroPolicy, belief) = uncertainty_lookup(policy.surrogate, belief)
-function uncertainty_lookup(f::EnsembleNetwork, belief)
-    x = network_input(belief)
-    μ, σ = cpu(f(x,return_std=true)) # evaluate network `f`. EnsembleNetwork is capable of returning μ, σ if return_std is set to true
-    return σ # suhastag here's where we could change standard deviation or variance
-end
-"""
-Evaluate the Neural network `f` using the `belief` as input, return variance of predicted values.
-This should work, as `f` is in train mode and employs dropout. Then there should be nonzero variance of 
-predicted values
-Note, inference is done on the CPU given a single input.
-"""
-function uncertainty_lookup(f::Chain, belief)
-    x = network_input(belief)
-    preds = []
-    for i in 1:20 # TODO: change from 20!!
-        preds.push!(cpu(f(x))) # evaluate network `f`
-    end
-    return std(preds) # suhastag here's where we could change standard deviation or variance
-end
+
 """
 Evaluate the neural network `f` using the `belief` as input, return the predicted policy vector.
 Note, inference is done on the CPU given a single input.

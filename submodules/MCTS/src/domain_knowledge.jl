@@ -98,12 +98,3 @@ Return a value to initialize N(s,a) to based on domain knowledge.
 function init_N end
 init_N(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
 init_N(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Int, n)
-
-"""
-    init_U(initializer, mdp, s)
-
-Return a value to initialize Uncertainty(s) to based on domain knowledge.
-"""
-function init_U end
-init_U(f::Function, mdp::Union{MDP,POMDP}, s) = f(mdp, s)
-init_U(n::Number, mdp::Union{MDP,POMDP}, s) = convert(Float64, n)

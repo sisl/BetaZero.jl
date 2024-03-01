@@ -18,8 +18,6 @@ Parameters for the BetaZero algorithm.
     train_missing_on_predicted::Bool = false  # Use predicted value in place of missing reward signal episodes
     eval_on_accuracy::Bool = false            # If evaluating (i.e., `n_evaluate > 0`), then base comparison on accuracy of the two networks
     bootstrap_q::Bool = false                 # Bootstrap the `init_Q` using the value network when a new (b,a) node is added during MCTS.
-    bootstrap_u::Bool = false                 # Bootstrap the `init_U` using the ensemble network when a new belief node is added during MCTS.
-    n_ensembled::Int = 1                     # If using an Ensemble Network, the number of weak learners to use.
 end
 
 
@@ -38,7 +36,7 @@ Parameters for neural network surrogate model.
     batchsize::Int = 512                             # Batch size
     learning_rate::Float64 = 1e-3                    # Learning rate for ADAM optimizer during training
     λ_regularization::Float64 = 1e-5                 # Parameter for L2-norm regularization
-    optimizer = Flux.Adam                            # Training optimizer (e.g., Adam, Descent, Nesterov)
+    optimizer = Adam                                 # Training optimizer (e.g., Adam, Descent, Nesterov)
     loss_func::Function = Flux.Losses.mse            # MAE works well for problems with large returns around zero, and spread out otherwise.
     activation::Function = relu                      # Activation function
     layer_size::Int = 64                             # Number of connections in fully connected layers (for CNN, refers to fully connected "head" layers)
@@ -61,7 +59,7 @@ Parameters for neural network surrogate model.
     use_kl_loss::Bool = false                        # Use KL-divergence as classification (policy) loss (for Gumbel solver)
     incremental_save::Bool = false                   # Incrementally save off policy every iteration (TODO: fix undefined reference error)
     policy_filename::String = "betazero_policy.bson" # Filename when incrementally saving off poliy
-    device = cpu                                     # Indicate what device to train on (`gpu` or `cpu`)
+    device = gpu                                     # Indicate what device to train on (`gpu` or `cpu`)
     use_checkpoint::Bool = true                      # Save networks along the way to use based on minimum validation loss
     checkpoint_frequency::Int = 1                    # How often do we evaluate and save a checkpoint?
     checkpoint_validation_loss::Bool = true          # Checkpoint based on minimum validation loss (`false` = checkpointing on training loss)
