@@ -49,6 +49,7 @@ end
 
 ParticleFilters.particles(b::ParticleHistoryBelief) = particles(b.particles)
 ParticleFilters.support(b::ParticleHistoryBelief) = particles(b)
+ParticleFilters.pdf(b::ParticleHistoryBelief, s) = pdf(b.particles, s)
 
 Base.hash(s::ParticleHistoryBelief, h::UInt) = hash(Tuple(getproperty(s, p) for p in propertynames(s)), h)
 Base.isequal(s1::ParticleHistoryBelief, s2::ParticleHistoryBelief) = all(isequal(getproperty(s1, p), getproperty(s2, p)) for p in propertynames(s1))

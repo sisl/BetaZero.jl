@@ -1,0 +1,9 @@
+Instructions for installing sgsim on Ubuntu 20.04
+
+Install Fortran compiler 'f95' -> this should come from gcc
+Go to http://www.statios.com/Quick/gslib.html
+Download   F90 source code (Linux) and unzip
+Change the compiler from 'g95' to 'f95' in two Makefiles: one in 'gslib90/Makefile' and the other in 'gslib90/gslib/Makefile'
+Navigate to 'gslib90' and run `make all` -> Warnings are ok
+Make a sim-link to the sgsim executable so that a system call of `sgsim` runs it (i.e. to /usr/bin/sgsim)
+Create a folder "sgsim_output" at location where sgsim will be called

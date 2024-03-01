@@ -118,6 +118,7 @@ function simulate(dpw::PUCTPlanner, snode::Int, d::Int)
     tree.n[sanode] += 1
     tree.total_n[snode] += 1
     tree.q[sanode] += (q - tree.q[sanode])/tree.n[sanode]
+    tree.value_uncertainty[snode] = tree.action_uncertainty[sanode] * discount(dpw.mdp) # Backpropate to update action uncertainty
 
     # max-Q backups
     # maxq_node = select_best(MaxQ(), tree, snode)
@@ -161,14 +162,24 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
     new_node = false
     if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
     # if (sol.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state) || tree.n_a_children[sanode] == 0 #! Note.
-        sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
-
+        sp, r, p = POMDPs.gen(dpw.mdp, s, a, dpw.rng) # @gen(:sp, :r, :p)(dpw.mdp, s, a, dpw.rng)
+        
         if sol.check_repeat_state && haskey(tree.s_lookup, sp)
             spnode = tree.s_lookup[sp]
+            new_sp_uncertainty = tree.value_uncertainty[spnode] * p
         else
             spnode = insert_state_node!(tree, sp, sol.keep_tree || sol.check_repeat_state)
+            new_sp_uncertainty = init_U(sol.init_U, dpw.mdp, sp) * p
+            push!(tree.value_uncertainty, new_sp_uncertainty)
             new_node = true
         end
+
+        @assert p > 0 && new_sp_uncertainty > 0 "Both p and new_sp_uncertainty must be non-zero"
+        # update average uncertainty of the sanode. Number of belief children for a sanode is tree.n_a_children[sanode]
+        # 1/(n+1)^2 [(n)^2 sigma^2_{n} + unc(new_sp)]
+        tree.action_uncertainty[sanode] = (1 / (tree.n_a_children[sanode] + 1)) * sqrt(
+            ((tree.n_a_children[sanode] * tree.action_uncertainty[sanode]) ^ 2 + new_sp_uncertainty ^ 2) 
+        )
 
         push!(tree.transitions[sanode], (spnode, r))
 
@@ -179,7 +190,12 @@ function state_widen!(dpw::PUCTPlanner, tree, sol, sanode, s, a, d)
             tree.n_a_children[sanode] += 1
         end
     else
-        spnode, r = rand(dpw.rng, tree.transitions[sanode])
+        # nvisits = [spn <= length(tree.n) ? tree.n[spn] + 1 : 1 for (spn, rew) in tree.transitions[sanode]]
+        scaled_uncertainty = [spn <= length(tree.n) ? tree.value_uncertainty[spn] : 1 for (spn, rew) in tree.transitions[sanode]] #./ nvisits
+        scaled_uncertainty = scaled_uncertainty / sum(scaled_uncertainty)
+        distr = Categorical(scaled_uncertainty)
+        selected_obs_ind = rand(distr)
+        spnode, r = tree.transitions[sanode][selected_obs_ind]
     end
 
     if new_node
@@ -201,7 +217,8 @@ function add_state!(sol::PUCTSolver, tree, sanode, sp, r)
         spnode = insert_state_node!(tree, sp, sol.keep_tree || sol.check_repeat_state)
         new_node = true
     end
-
+    
+    # push!(tree.uncertainties[sanode], rand())
     push!(tree.transitions[sanode], (spnode, r))
 
     if !sol.check_repeat_state

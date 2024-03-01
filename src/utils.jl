@@ -153,7 +153,12 @@ function bootstrap(f)
     return (bmdp,b,a)->bmdp.belief_reward(bmdp.pomdp, b, a, nothing) + discount(bmdp)*value_lookup(f, @gen(:sp)(bmdp, b, a))
 end
 
-
+"""
+Return initial U function which estimates uncertainties of belief nodes
+"""
+function bootstrap_uncertainty(f)
+    return (bmdp,b)->uncertainty_lookup(f, b)    
+end
 """
 Install supporting example POMDP models, the `RemoteJobs` package, and the `ParticleBeliefs` wrapper.
 """
