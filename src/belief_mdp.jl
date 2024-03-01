@@ -24,7 +24,10 @@ function POMDPs.gen(bmdp::BeliefMDP, b, a, rng::AbstractRNG)
     sp, o = @gen(:sp, :o)(bmdp.pomdp, s, a, rng)
     bp = update(bmdp.updater, b, a, o)
     r = bmdp.belief_reward(bmdp.pomdp, b, a, bp)
-    return (sp=bp, r=r)
+    p = pdf(b, s)
+    p *= pdf(transition(bmdp.pomdp, s, a), sp)
+    p *= pdf(observation(bmdp.pomdp, s, a, sp), o) 
+    return (sp=bp, r=r, p=p)
 end
 
 POMDPs.actions(bmdp::BeliefMDP{P,U,B,A}, b::B) where {P,U,B,A} = actions(bmdp.pomdp, b)

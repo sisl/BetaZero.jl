@@ -22,7 +22,7 @@ solver.nn_params.p_dropout = 0.2
 
 # parameters for Beta One
 solver.params.bootstrap_u = true
-solver.params.n_ensembled = 10
+solver.params.n_ensembled = 1
 
 solver.expert_results = (expert_accuracy=[0.84, 0.037], expert_returns=[11.963, 1.617], expert_label="LAVI") # LAVI baseline
 # solver.expert_results = (expert_accuracy=[0.0, 0.0], expert_returns=[3.55, 0.15], expert_label="LAVI [LD(5)]") # LAVI baseline
