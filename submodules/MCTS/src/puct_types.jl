@@ -76,13 +76,6 @@ Fields:
         If this is an object `o`, `init_N(o, mdp, s, a)` will be called.
         If this is a number, N will always be set to that number.
         default: 0
-    
-    init_U::Any
-        Function, object, or number used to set the initial uncertainty value at a new belief node.
-        If this is a function `f`, `f(mdp, s)` will be called to set the value.
-        If this is an object `o`, `init_U(o, mdp, s)` will be called.
-        If this is a number, U will always be set to that number.
-        default: 1.0
 
     next_action::Any
         Function or object used to choose the next action to be considered for progressive widening.
@@ -133,7 +126,6 @@ mutable struct PUCTSolver <: AbstractMCTSSolver
     estimate_policy::Any
     init_Q::Any
     init_N::Any
-    init_U::Any
     next_action::Any
     default_action::Any
     reset_callback::Function
@@ -168,7 +160,6 @@ function PUCTSolver(;
                     estimate_policy::Any=0,
                     init_Q::Any=0.0,
                     init_N::Any=0,
-                    init_U::Any=1.0,
                     next_action::Any=RandomActionGenerator(rng),
                     default_action::Any=ExceptionRethrow(),
                     reset_callback::Function=(mdp, s) -> false,
@@ -196,7 +187,6 @@ function PUCTSolver(;
             estimate_policy,
             init_Q,
             init_N,
-            init_U,
             next_action,
             default_action,
             reset_callback,
@@ -212,14 +202,11 @@ mutable struct PUCTTree{S,A}
     children::Vector{Vector{Int}}
     s_labels::Vector{S}
     s_lookup::Dict{S, Int}
-    value_uncertainty::Vector{Float64}
 
     # for each state-action node
     n::Vector{Int}
     q::Vector{Float64}
     transitions::Vector{Vector{Tuple{Int,Float64}}}
-    # uncertainties::Vector{Vector{Float64}} # Uncertainty estimate for child belief. Use uncertainties[sanode][ind] to get var of a node
-    action_uncertainty::Vector{Float64} # Uncertainty estimate for action node.
     a_labels::Vector{A}
     a_lookup::Dict{Tuple{Int,A}, Int}
 
@@ -234,13 +221,10 @@ mutable struct PUCTTree{S,A}
                    sizehint!(Vector{Int}[], sz),
                    sizehint!(S[], sz),
                    Dict{S, Int}(),
-                   sizehint!(Float64[], sz),
                    
                    sizehint!(Int[], sz),
                    sizehint!(Float64[], sz),
                    sizehint!(Vector{Tuple{Int,Float64}}[], sz),
-                   # sizehint!(Vector{Float64}[], sz),
-                   sizehint!(Float64[], sz),
                    sizehint!(A[], sz),
                    Dict{Tuple{Int,A}, Int}(),
 
@@ -268,8 +252,6 @@ function insert_action_node!(tree::PUCTTree{S,A}, snode::Int, a::A, n0::Int, q0:
     push!(tree.q, q0)
     push!(tree.a_labels, a)
     push!(tree.transitions, Vector{Tuple{Int,Float64}}[])
-    # push!(tree.uncertainties, Vector{Float64}[])
-    push!(tree.action_uncertainty, 0)
     sanode = length(tree.n)
     push!(tree.children[snode], sanode)
     push!(tree.n_a_children, 0)
