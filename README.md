@@ -9,9 +9,6 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
     <img src="./media/betazero.svg">
 </p>
 
-## ConstrainedZero
-For the _ConstrainedZero_ algorithm for CC-POMDPs, see the [#safety](https://github.com/sisl/BetaZero.jl/tree/safety) branch.
-
 ## Installation
 
 To install the BetaZero solver, run:
