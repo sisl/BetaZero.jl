@@ -1,4 +1,6 @@
 # BetaZero.jl
+[![arXiv](https://img.shields.io/badge/BetaZero:%20arXiv-2306.00249-b31b1b.svg)](https://arxiv.org/abs/2306.00249)
+[![arXiv](https://img.shields.io/badge/ConstrainedZero:%20arXiv-2405.00644-b31b1b.svg)](https://arxiv.org/abs/2405.00644)
 
 Belief-state planning algorithm for POMDPs using learned approximations; integrated into the [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) ecosystem.
 
@@ -9,8 +11,18 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
     <img src="./media/betazero.svg">
 </p>
 
+## Citation
+```
+@inproceedings{moss2024betazero,
+  title={{BetaZero: Belief-State Planning for Long-Horizon POMDPs using Learned Approximations}},
+  author={Moss, Robert J. and Corso, Anthony and Caers, Jef and Kochenderfer, Mykel J.},
+  booktitle={Reinforcement Learning Conference (RLC)},
+  year={2024},
+}
+```
+
 ## ConstrainedZero
-For the _ConstrainedZero_ algorithm for CC-POMDPs, see the [#safety](https://github.com/sisl/BetaZero.jl/tree/safety) branch.
+For the _ConstrainedZero_ algorithm for CC-POMDPs, see the [#safety](https://github.com/sisl/BetaZero.jl/tree/safety) branch or [ConstrainedZero.jl](https://github.com/sisl/ConstrainedZero.jl).
 
 ## Installation
 
@@ -282,7 +294,3 @@ solver.mcts_solver.final_criterion = SampleZQN(τ=0, zq=1, zn=1)
 [1] [https://github.com/JuliaPOMDP/MCTS.jl](https://github.com/JuliaPOMDP/MCTS.jl)
 
 [2] [https://github.com/sisl/RoombaPOMDPs.jl](https://github.com/JuliaPOMDP/MCTS.jl)
-
-## Citation
-
-> Under review.
