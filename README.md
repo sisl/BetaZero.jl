@@ -11,12 +11,24 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
     <img src="./media/betazero.svg">
 </p>
 
-## Citation
+## Citations
+
+**BetaZero**:
 ```
 @inproceedings{moss2024betazero,
   title={{BetaZero: Belief-State Planning for Long-Horizon POMDPs using Learned Approximations}},
   author={Moss, Robert J. and Corso, Anthony and Caers, Jef and Kochenderfer, Mykel J.},
   booktitle={Reinforcement Learning Conference (RLC)},
+  year={2024},
+}
+```
+
+**ConstrainedZero**:
+```
+@inproceedings{moss2024constrainedzero,
+  title={{ConstrainedZero: Chance-Constrained POMDP Planning Using Learned Probabilistic Failure Surrogates and Adaptive Safety Constraints}},
+  author={Moss, Robert J. and Jamgochian, Arec and Fischer, Johannes and Corso, Anthony and Kochenderfer, Mykel J.},
+  booktitle={International Joint Conference on Artificial Intelligence (IJCAI)},
   year={2024},
 }
 ```
