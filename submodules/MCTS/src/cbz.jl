@@ -231,7 +231,7 @@ function state_widen!(cbz::CBZPlanner, tree, sol, sanode, s, a, d)
     q = r + γ*v′
 
     δ = sol.δ
-    p = (1-δ)*p + δ*(1-p)*p′
+    p = p + δ*(1-p)*p′
 
     return q, p
 end
