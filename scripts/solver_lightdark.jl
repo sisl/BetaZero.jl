@@ -18,7 +18,16 @@ solver = BetaZeroSolver(pomdp=pomdp,
 if use_despot
     random = solve(RandomSolver(), pomdp)
     bds = ARDESPOT.IndependentBounds(ARDESPOT.DefaultPolicyLB(random), pomdp.correct_r, check_terminal=true)
-    solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=100.0, K=500, T_max=0.1, D=50, bounds=bds, bounds_warnings=false)
+    # solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=10.0, K=30, T_max=1, D=90, bounds=bds, bounds_warnings=false)
+
+    # solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=0.1, K=100, T_max=1, D=90, bounds=bds, bounds_warnings=false) # LightDark(5)
+
+    # solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=0.1, K=30, T_max=1, D=90, bounds=bds, bounds_warnings=false) # NOTE: Same as `baselines.jl`
+    
+    solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=100.0, K=500, T_max=1, D=50, bounds=bds, bounds_warnings=false)
+
+    # solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=100.0, K=500, T_max=0.1, D=50, bounds=bds, bounds_warnings=false) # Old LD(10)
+    # solver.mcts_solver = DESPOTSolver(; default_action=random, lambda=0.1, K=500, T_max=1, D=50, bounds=bds, bounds_warnings=false)
 else
     # CBZ-MCTS
     solver.mcts_solver.n_iterations = is_constrained ? 500 : 100

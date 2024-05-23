@@ -19,11 +19,11 @@ end
 
 up = ParticleHistoryBeliefUpdater(BootstrapFilter(pomdp, 500))
 
-POMDPs.solve(sol::DESPOTSolver, p::BeliefMDP) = solve(sol, p.pomdp)
+POMDPs.solve(sol::DESPOTSolver, p::BeliefMDP) = solve(sol, p.pomdp) # ! NOTE: Moved to pomdps_glue.jl ::MDP
 
 zeroifnan(x) = isnan(x) ? 0 : x
 
-function BetaZero.input_representation(b::ScenarioBelief)
+function BetaZero.input_representation(b::ScenarioBelief) # ! NOTE.
     P = collect(particles(b))
     Y = [s.y for s in P]
     t = Float32(P[1].t) # all the same time

@@ -10,6 +10,6 @@ else
     policy = solve(solver, pomdp; plot_callback=ld_plot_callback)
 end
 
-filename_suffix = "lightdark_lets_drive_phi"
-BetaZero.save_policy(policy, "policy_$filename_suffix.bson")
-BetaZero.save_solver(solver, "solver_$filename_suffix.bson")
+filename_suffix = "lightdark10_lets_drive_phi"
+# BetaZero.save_policy(policy, "policy_$filename_suffix.bson")
+# BetaZero.save_solver(solver, "solver_$filename_suffix.bson")

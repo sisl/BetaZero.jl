@@ -27,7 +27,7 @@ if RESOLVE
 														n_generative_samples=100) # 10
 		bmdp = BeliefMDP(pomdp, up, lightdark_belief_reward)
 		@time lavi_policy = solve(vi_solver, bmdp)
-		BSON.@save "policy_lavi_ld10_icaps_larger_space.bson" lavi_policy
+		BSON.@save "policy_lavi_ld5_rlc_larger_space.bson" lavi_policy
 		@info "Running statistics..."
 		n_sims = 100
 		@show mean_and_stderr(simulate(RolloutSimulator(max_steps=100), bmdp, lavi_policy) for _ in 1:n_sims)
