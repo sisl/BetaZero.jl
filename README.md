@@ -1,4 +1,6 @@
-# BetaZero.jl
+# BetaZero.jl (ConstrainedZero)
+[![arXiv](https://img.shields.io/badge/BetaZero:%20arXiv-2306.00249-b31b1b.svg)](https://arxiv.org/abs/2306.00249)
+[![arXiv](https://img.shields.io/badge/ConstrainedZero:%20arXiv-2405.00644-b31b1b.svg)](https://arxiv.org/abs/2405.00644)
 
 Belief-state planning algorithm for POMDPs using learned approximations; integrated into the [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) ecosystem. Implementations of the BetaZero (POMDP) and ConstrainedZero (CC-POMDP) policy iteration algorithms.
 
@@ -8,6 +10,28 @@ Belief-state planning algorithm for POMDPs using learned approximations; integra
 <p align="center">
     <img src="./media/betazero.svg">
 </p>
+
+## Citations
+
+**BetaZero**:
+```
+@inproceedings{moss2024betazero,
+  title={{BetaZero: Belief-State Planning for Long-Horizon POMDPs using Learned Approximations}},
+  author={Moss, Robert J. and Corso, Anthony and Caers, Jef and Kochenderfer, Mykel J.},
+  booktitle={Reinforcement Learning Conference (RLC)},
+  year={2024},
+}
+```
+
+**ConstrainedZero**:
+```
+@inproceedings{moss2024constrainedzero,
+  title={{ConstrainedZero: Chance-Constrained POMDP Planning Using Learned Probabilistic Failure Surrogates and Adaptive Safety Constraints}},
+  author={Moss, Robert J. and Jamgochian, Arec and Fischer, Johannes and Corso, Anthony and Kochenderfer, Mykel J.},
+  booktitle={International Joint Conference on Artificial Intelligence (IJCAI)},
+  year={2024},
+}
+```
 
 ## Installation
 
@@ -34,6 +58,7 @@ using BetaZero
 using LightDark
 
 pomdp = LightDarkPOMDP()
+pomdp.incorrect_r = 0 # ConstainedZero: For LightDark CC-POMDP
 up = BootstrapFilter(pomdp, 500)
 
 function BetaZero.input_representation(b::ParticleCollection{LightDarkState})
@@ -49,6 +74,7 @@ end
 
 solver = BetaZeroSolver(pomdp=pomdp,
                         updater=up,
+                        is_constrained=true, # <-- ConstrainedZero flag.
                         params=BetaZeroParameters(
                             n_iterations=50,
                             n_data_gen=50,
@@ -67,6 +93,12 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         collect_metrics=true,
                         plot_incremental_data_gen=true)
 
+# ConstainedZero specific parameters
+solver.mcts_solver.Δ0 = 0.01
+solver.mcts_solver.η = 0.00001
+solver.mcts_solver.final_criterion = MaxZQNS(zq=1, zn=1)
+
+# Run ConstainedZero
 policy = solve(solver, pomdp)
 save_policy(policy, "policy.bson")
 save_solver(solver, "solver.bson")
@@ -83,6 +115,11 @@ solver.is_constrained = true
 pomdp.incorrect_r = 0 # for LightDark CC-POMDP
 ```
 
+Set the $\Delta_0$ chance constraint and the $\eta$ adaptive conformal inference learning rate via:
+```julia
+solver.mcts_solver.Δ0 = 0.01
+solver.mcts_solver.η = 0.00001
+```
 
 ### Parallel Usage
 
@@ -97,6 +134,7 @@ addprocs([("user@hostname1", 25), ("user@hostname2", 25)], tunnel=true) # launch
     using LightDark
 
     pomdp = LightDarkPOMDP()
+    pomdp.incorrect_r = 0 # ConstainedZero: For LightDark CC-POMDP
     up = BootstrapFilter(pomdp, 500)
 
     function BetaZero.input_representation(b::ParticleCollection{LightDarkState})
@@ -113,6 +151,7 @@ end
 
 solver = BetaZeroSolver(pomdp=pomdp,
                         updater=up,
+                        is_constrained=true, # <-- ConstrainedZero flag.
                         params=BetaZeroParameters(
                             n_iterations=50,
                             n_data_gen=500, # Note increased to 500 when running in parallel.
@@ -131,12 +170,16 @@ solver = BetaZeroSolver(pomdp=pomdp,
                         collect_metrics=true,
                         plot_incremental_data_gen=true)
 
+# ConstainedZero specific parameters
+solver.mcts_solver.Δ0 = 0.01
+solver.mcts_solver.η = 0.00001
+solver.mcts_solver.final_criterion = MaxZQNS(zq=1, zn=1)
+
 policy = solve(solver, pomdp)
 save_policy(policy, "policy.bson")
 save_solver(solver, "solver.bson")
 ```
 This example is also located at: [`scripts/readme_example_parallel.jl`](https://github.com/sisl/BetaZero.jl/blob/main/scripts/readme_example_parallel.jl)
-
 
 
 ### Other Examples
@@ -308,9 +351,3 @@ solver.mcts_solver.final_criterion = MaxZQNS(zq=1, zn=1)
 [1] [https://github.com/JuliaPOMDP/MCTS.jl](https://github.com/JuliaPOMDP/MCTS.jl)
 
 [2] [https://github.com/sisl/RoombaPOMDPs.jl](https://github.com/JuliaPOMDP/MCTS.jl)
-
-## Citations
-
-> BetaZero: Under review.
-
-> ConstrainedZero: Under review.
